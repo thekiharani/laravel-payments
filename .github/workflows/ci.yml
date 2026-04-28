@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches: [main, release]
-    tags: ["v*"]
   pull_request:
     branches: [main, release]
 
@@ -50,7 +49,7 @@ jobs:
 
   tag:
     needs: verify
-    if: github.ref == 'refs/heads/release'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -96,8 +95,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release:
-    needs: [test, tag]
-    if: always() && (needs.tag.result == 'success' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [verify, tag]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release' && needs.tag.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -109,12 +108,7 @@ jobs:
 
       - name: Get tag name
         id: tag
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "name=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         run: gh release create ${{ steps.tag.outputs.name }} --generate-notes
