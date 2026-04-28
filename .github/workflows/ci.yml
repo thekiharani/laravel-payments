@@ -81,22 +81,13 @@ jobs:
           VERSION="${LATEST_TAG#v}"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
 
-          # Check commit messages since last tag for bump type
-          COMMITS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
-
-          if echo "$COMMITS" | grep -qiE "^breaking[:(]|BREAKING CHANGE"; then
-            MAJOR=$((MAJOR + 1))
-            MINOR=0
-            PATCH=0
-            echo "Bump: major"
-          elif echo "$COMMITS" | grep -qiE "^feat[:(]"; then
-            MINOR=$((MINOR + 1))
-            PATCH=0
-            echo "Bump: minor"
-          else
-            PATCH=$((PATCH + 1))
-            echo "Bump: patch"
+          if [ "$MAJOR" -ne 0 ] || [ "$MINOR" -ne 1 ]; then
+            echo "Refusing to auto-release outside v0.1.x. Move the release baseline manually when you are ready."
+            exit 1
           fi
+
+          PATCH=$((PATCH + 1))
+          echo "Bump: patch"
 
           NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
           echo "New tag: $NEW_TAG"
