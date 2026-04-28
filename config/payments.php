@@ -64,4 +64,20 @@ return [
             'verify_signature' => env('SASAPAY_CALLBACK_VERIFY_SIGNATURE', true),
         ],
     ],
+
+    'paystack' => [
+        'base_url' => env('PAYSTACK_BASE_URL', 'https://api.paystack.co'),
+        'secret_key' => env('PAYSTACK_SECRET_KEY'),
+        'endpoints' => [],
+        'webhook_security' => [
+            'secret_key' => env('PAYSTACK_WEBHOOK_SECRET_KEY', env('PAYSTACK_SECRET_KEY')),
+            'trusted_ips' => env('PAYSTACK_WEBHOOK_TRUSTED_IPS', [
+                '52.31.139.75',
+                '52.49.173.169',
+                '52.214.14.220',
+            ]),
+            'enforce_ip_whitelist' => env('PAYSTACK_WEBHOOK_ENFORCE_IP_WHITELIST', false),
+            'verify_signature' => env('PAYSTACK_WEBHOOK_VERIFY_SIGNATURE', true),
+        ],
+    ],
 ];

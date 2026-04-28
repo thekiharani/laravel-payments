@@ -7,6 +7,8 @@ use Illuminate\Http\Client\Factory;
 use Illuminate\Support\ServiceProvider;
 use NoriaLabs\Payments\MpesaClient;
 use NoriaLabs\Payments\PaymentsManager;
+use NoriaLabs\Payments\PaystackClient;
+use NoriaLabs\Payments\PaystackWebhookVerifier;
 use NoriaLabs\Payments\SasaPayCallbackVerifier;
 use NoriaLabs\Payments\SasaPayClient;
 
@@ -34,6 +36,14 @@ class PaymentsServiceProvider extends ServiceProvider
 
         $this->app->bind(SasaPayCallbackVerifier::class, function ($app): SasaPayCallbackVerifier {
             return $app->make(PaymentsManager::class)->sasapayCallbackVerifier();
+        });
+
+        $this->app->bind(PaystackClient::class, function ($app): PaystackClient {
+            return $app->make(PaymentsManager::class)->paystack();
+        });
+
+        $this->app->bind(PaystackWebhookVerifier::class, function ($app): PaystackWebhookVerifier {
+            return $app->make(PaymentsManager::class)->paystackWebhookVerifier();
         });
     }
 

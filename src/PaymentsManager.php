@@ -50,6 +50,24 @@ class PaymentsManager
         return SasaPayCallbackVerifier::make($this->mergedConfig('sasapay', $overrides));
     }
 
+    public function paystack(
+        array $overrides = [],
+        ?AccessTokenProvider $tokenProvider = null,
+        ?Hooks $hooks = null,
+    ): PaystackClient {
+        return PaystackClient::make(
+            httpFactory: $this->http,
+            config: $this->mergedConfig('paystack', $overrides),
+            tokenProvider: $tokenProvider,
+            hooks: $hooks,
+        );
+    }
+
+    public function paystackWebhookVerifier(array $overrides = []): PaystackWebhookVerifier
+    {
+        return PaystackWebhookVerifier::make($this->mergedConfig('paystack', $overrides));
+    }
+
     private function mergedConfig(string $provider, array $overrides): array
     {
         $http = (array) $this->config->get('payments.http', []);

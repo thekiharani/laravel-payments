@@ -1,12 +1,13 @@
 {
   "name": "thekiharani/laravel-payments",
-  "description": "Laravel SDK for payment integrations: M-PESA Daraja, SasaPay merchant APIs, and SasaPay WAAS.",
+  "description": "Laravel SDK for payment integrations: M-PESA Daraja, SasaPay, and Paystack.",
   "keywords": [
     "laravel",
     "payments",
     "mpesa",
     "daraja",
     "sasapay",
+    "paystack",
     "kenya"
   ],
   "license": "MIT",

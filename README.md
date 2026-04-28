@@ -1,12 +1,13 @@
 # Laravel Payments
 
-Laravel package for payment providers, starting with:
+Laravel package for payment providers:
 
 - M-PESA Daraja
 - SasaPay v1 merchant APIs
 - SasaPay Wallet as a Service (WAAS) v2 APIs
+- Paystack APIs
 
-The package is a Laravel-native HTTP SDK. It registers container bindings, publishes config, obtains and caches OAuth tokens, sends authenticated requests, supports retries and hooks, verifies SasaPay callback signatures, and throws typed exceptions for HTTP and network failures.
+The package is a Laravel-native HTTP SDK. It registers container bindings, publishes config, obtains and caches OAuth tokens where providers require them, sends authenticated requests, supports retries and hooks, verifies SasaPay callbacks and Paystack webhooks, and throws typed exceptions for HTTP and network failures.
 
 It does not persist transactions, define your application callback controllers, reconcile settlements, or transform provider callback payloads. Your application owns those concerns.
 
@@ -35,6 +36,8 @@ The package registers:
 - `NoriaLabs\Payments\MpesaClient`
 - `NoriaLabs\Payments\SasaPayClient`
 - `NoriaLabs\Payments\SasaPayCallbackVerifier`
+- `NoriaLabs\Payments\PaystackClient`
+- `NoriaLabs\Payments\PaystackWebhookVerifier`
 
 It also registers the facade alias:
 
@@ -49,6 +52,7 @@ Top-level sections:
 - `http`
 - `mpesa`
 - `sasapay`
+- `paystack`
 
 ### Shared HTTP Config
 
@@ -106,6 +110,18 @@ Top-level sections:
 | `callback_security.verify_signature` | Verify callback HMAC signatures when using `verifyRequest()` or the middleware. Defaults to `true`; set `SASAPAY_CALLBACK_VERIFY_SIGNATURE=false` only if you intentionally rely on a different callback-authentication control. |
 
 SasaPay production hosts are not hard-coded. The reviewed SasaPay docs document sandbox hosts clearly, but production hosts are created through SasaPay production applications. Provide production `base_url` and `waas_base_url` explicitly.
+
+### Paystack Config
+
+| Key | Description |
+| --- | --- |
+| `base_url` | Paystack API base URL. Defaults to `https://api.paystack.co`. Paystack uses your API key to determine test vs live mode. |
+| `secret_key` | Paystack secret key used as the bearer token. |
+| `endpoints` | Optional endpoint-path overrides keyed by `PaystackClient::ENDPOINTS`. |
+| `webhook_security.secret_key` | HMAC secret for inbound webhooks. Defaults to `PAYSTACK_SECRET_KEY`. |
+| `webhook_security.trusted_ips` | Paystack webhook source IP allowlist. Defaults to the documented Paystack list. Override in published config or with comma-separated `PAYSTACK_WEBHOOK_TRUSTED_IPS`. |
+| `webhook_security.enforce_ip_whitelist` | Reject webhooks from non-allowlisted IPs when using `verifyRequest()` or the middleware. Defaults to `false`; enable it after Laravel trusted proxy handling is configured for your deployment. |
+| `webhook_security.verify_signature` | Verify `x-paystack-signature` HMAC signatures when using `verifyRequest()` or the middleware. Defaults to `true`. |
 
 ## Usage
 
@@ -171,6 +187,54 @@ $response = $sasapay->waasRequestPayment([
     'transactionDesc' => 'Wallet topup',
     'callbackUrl' => 'https://example.com/sasapay/waas/callback',
 ]);
+```
+
+### Paystack Initialize Transaction
+
+```php
+use NoriaLabs\Payments\PaystackClient;
+
+$paystack = app(PaystackClient::class);
+
+$response = $paystack->initializeTransaction([
+    'email' => 'customer@example.com',
+    'amount' => 10000,
+    'currency' => 'NGN',
+    'reference' => 'INV-001',
+    'callback_url' => 'https://example.com/paystack/callback',
+]);
+```
+
+### Paystack Webhook Security
+
+Paystack documents two webhook-origin controls:
+
+- verify the `x-paystack-signature` header with HMAC-SHA512 over the raw request body
+- verify the request source IP against the Paystack allowlist
+
+Use the middleware on your webhook route:
+
+```php
+use NoriaLabs\Payments\Http\Middleware\VerifyPaystackWebhook;
+
+Route::post('/paystack/webhook', PaystackWebhookController::class)
+    ->middleware(VerifyPaystackWebhook::class);
+```
+
+Or verify manually:
+
+```php
+use Illuminate\Http\Request;
+use NoriaLabs\Payments\PaystackWebhookVerifier;
+
+public function __invoke(Request $request, PaystackWebhookVerifier $verifier)
+{
+    if (! $verifier->verifyRequest($request, enforceIpWhitelist: true, verifySignature: true)) {
+        abort(403);
+    }
+
+    // Process the already-authenticated webhook payload.
+}
 ```
 
 ### SasaPay Callback Security
@@ -251,7 +315,222 @@ $sasapay = $manager->sasapay([
         'X-App-Name' => 'billing',
     ],
 ]);
+
+$paystack = $manager->paystack([
+    'secret_key' => config('services.paystack.secret_key'),
+]);
 ```
+
+## Paystack Coverage
+
+Paystack uses one API host for test and live mode: `https://api.paystack.co`. The secret key determines the environment. The client keeps Paystack field names and amount units exactly as Paystack documents them; pass amounts in provider subunits.
+
+### Paystack Auth and Webhooks
+
+| API | Behavior |
+| --- | --- |
+| `PaystackClient::getAccessToken()` | Returns the configured secret key or custom token-provider value. |
+| `PaystackWebhookVerifier::expectedSignature()` | Computes the HMAC-SHA512 hex digest over the raw request body. |
+| `PaystackWebhookVerifier::verify()` | Validates raw body/signature/IP checks according to configured or per-call toggles. |
+| `PaystackWebhookVerifier::verifyRequest()` | Extracts the raw body, `x-paystack-signature`, and IP from a Laravel request. |
+| `PaystackWebhookVerifier::isTrustedIp()` | Checks the documented Paystack webhook IP allowlist. |
+| `PaystackWebhookVerifier::trustedIps()` | Returns the active Paystack webhook IP allowlist. |
+| `PaystackWebhookVerifier::verifiesSignature()` | Shows whether signature verification is enabled by default. |
+| `VerifyPaystackWebhook` middleware | Rejects invalid Laravel webhook requests with HTTP 403 according to webhook-security config. |
+
+### Paystack Transactions, Charge, Bulk Charge, Subaccounts, Splits
+
+| Method | Endpoint |
+| --- | --- |
+| `initializeTransaction()` | `POST /transaction/initialize` |
+| `chargeAuthorization()` | `POST /transaction/charge_authorization` |
+| `partialDebit()` | `POST /transaction/partial_debit` |
+| `verifyTransaction($reference)` | `GET /transaction/verify/{reference}` |
+| `listTransactions()` | `GET /transaction` |
+| `fetchTransaction($id)` | `GET /transaction/{id}` |
+| `transactionTimeline($id)` | `GET /transaction/timeline/{id}` |
+| `transactionTotals()` | `GET /transaction/totals` |
+| `exportTransactions()` | `GET /transaction/export` |
+| `createCharge()` | `POST /charge` |
+| `submitChargePin()` | `POST /charge/submit_pin` |
+| `submitChargeOtp()` | `POST /charge/submit_otp` |
+| `submitChargePhone()` | `POST /charge/submit_phone` |
+| `submitChargeBirthday()` | `POST /charge/submit_birthday` |
+| `submitChargeAddress()` | `POST /charge/submit_address` |
+| `checkPendingCharge($reference)` | `GET /charge/{reference}` |
+| `initiateBulkCharge()` | `POST /bulkcharge` |
+| `listBulkChargeBatches()` | `GET /bulkcharge` |
+| `fetchBulkChargeBatch($code)` | `GET /bulkcharge/{code}` |
+| `fetchBulkChargeBatchCharges($code)` | `GET /bulkcharge/{code}/charges` |
+| `pauseBulkChargeBatch($code)` | `GET /bulkcharge/pause/{code}` |
+| `resumeBulkChargeBatch($code)` | `GET /bulkcharge/resume/{code}` |
+| `createSubaccount()` | `POST /subaccount` |
+| `listSubaccounts()` | `GET /subaccount` |
+| `fetchSubaccount($code)` | `GET /subaccount/{code}` |
+| `updateSubaccount($code)` | `PUT /subaccount/{code}` |
+| `createSplit()` | `POST /split` |
+| `listSplits()` | `GET /split` |
+| `fetchSplit($id)` | `GET /split/{id}` |
+| `updateSplit($id)` | `PUT /split/{id}` |
+| `addSubaccountToSplit($id)` | `POST /split/{id}/subaccount/add` |
+| `removeSubaccountFromSplit($id)` | `POST /split/{id}/subaccount/remove` |
+
+### Paystack Terminals
+
+| Method | Endpoint |
+| --- | --- |
+| `sendTerminalEvent($id)` | `POST /terminal/{id}/event` |
+| `fetchTerminalEventStatus($terminalId, $eventId)` | `GET /terminal/{terminal_id}/event/{event_id}` |
+| `fetchTerminalStatus($terminalId)` | `GET /terminal/{terminal_id}/presence` |
+| `listTerminals()` | `GET /terminal` |
+| `fetchTerminal($terminalId)` | `GET /terminal/{terminal_id}` |
+| `updateTerminal($terminalId)` | `PUT /terminal/{terminal_id}` |
+| `commissionTerminal()` | `POST /terminal/commission_device` |
+| `decommissionTerminal()` | `POST /terminal/decommission_device` |
+| `createVirtualTerminal()` | `POST /virtual_terminal` |
+| `listVirtualTerminals()` | `GET /virtual_terminal` |
+| `fetchVirtualTerminal($code)` | `GET /virtual_terminal/{code}` |
+| `updateVirtualTerminal($code)` | `PUT /virtual_terminal/{code}` |
+| `deactivateVirtualTerminal($code)` | `PUT /virtual_terminal/{code}/deactivate` |
+| `assignVirtualTerminalDestination($code)` | `POST /virtual_terminal/{code}/destination/assign` |
+| `unassignVirtualTerminalDestination($code)` | `POST /virtual_terminal/{code}/destination/unassign` |
+| `addVirtualTerminalSplitCode($code)` | `PUT /virtual_terminal/{code}/split_code` |
+| `removeVirtualTerminalSplitCode($code)` | `DELETE /virtual_terminal/{code}/split_code` |
+
+### Paystack Customers, Direct Debit, Dedicated Accounts, Apple Pay
+
+| Method | Endpoint |
+| --- | --- |
+| `createCustomer()` | `POST /customer` |
+| `listCustomers()` | `GET /customer` |
+| `fetchCustomer($code)` | `GET /customer/{code}` |
+| `updateCustomer($code)` | `PUT /customer/{code}` |
+| `setCustomerRiskAction()` | `POST /customer/set_risk_action` |
+| `validateCustomer($code)` | `POST /customer/{code}/identification` |
+| `initializeAuthorization()` | `POST /customer/authorization/initialize` |
+| `verifyAuthorization($reference)` | `GET /customer/authorization/verify/{reference}` |
+| `deactivateAuthorization()` | `POST /customer/authorization/deactivate` |
+| `initializeDirectDebit($id)` | `POST /customer/{id}/initialize-direct-debit` |
+| `customerDirectDebitActivationCharge($id)` | `PUT /customer/{id}/directdebit-activation-charge` |
+| `customerDirectDebitMandateAuthorizations($id)` | `GET /customer/{id}/directdebit-mandate-authorizations` |
+| `triggerDirectDebitActivationCharge()` | `PUT /directdebit/activation-charge` |
+| `listDirectDebitMandateAuthorizations()` | `GET /directdebit/mandate-authorizations` |
+| `createDedicatedAccount()` | `POST /dedicated_account` |
+| `listDedicatedAccounts()` | `GET /dedicated_account` |
+| `assignDedicatedAccount()` | `POST /dedicated_account/assign` |
+| `fetchDedicatedAccount($id)` | `GET /dedicated_account/{id}` |
+| `deactivateDedicatedAccount($id)` | `DELETE /dedicated_account/{id}` |
+| `requeryDedicatedAccount()` | `GET /dedicated_account/requery` |
+| `splitDedicatedAccountTransaction()` | `POST /dedicated_account/split` |
+| `removeSplitFromDedicatedAccount()` | `DELETE /dedicated_account/split` |
+| `fetchDedicatedAccountProviders()` | `GET /dedicated_account/available_providers` |
+| `registerApplePayDomain()` | `POST /apple-pay/domain` |
+| `listApplePayDomains()` | `GET /apple-pay/domain` |
+| `unregisterApplePayDomain()` | `DELETE /apple-pay/domain` |
+
+### Paystack Plans, Subscriptions, Transfers
+
+| Method | Endpoint |
+| --- | --- |
+| `createPlan()` | `POST /plan` |
+| `listPlans()` | `GET /plan` |
+| `fetchPlan($code)` | `GET /plan/{code}` |
+| `updatePlan($code)` | `PUT /plan/{code}` |
+| `createSubscription()` | `POST /subscription` |
+| `listSubscriptions()` | `GET /subscription` |
+| `fetchSubscription($code)` | `GET /subscription/{code}` |
+| `disableSubscription()` | `POST /subscription/disable` |
+| `enableSubscription()` | `POST /subscription/enable` |
+| `subscriptionManagementLink($code)` | `GET /subscription/{code}/manage/link` |
+| `sendSubscriptionManagementEmail($code)` | `POST /subscription/{code}/manage/email` |
+| `createTransferRecipient()` | `POST /transferrecipient` |
+| `listTransferRecipients()` | `GET /transferrecipient` |
+| `bulkCreateTransferRecipients()` | `POST /transferrecipient/bulk` |
+| `fetchTransferRecipient($code)` | `GET /transferrecipient/{code}` |
+| `updateTransferRecipient($code)` | `PUT /transferrecipient/{code}` |
+| `deleteTransferRecipient($code)` | `DELETE /transferrecipient/{code}` |
+| `initiateTransfer()` | `POST /transfer` |
+| `listTransfers()` | `GET /transfer` |
+| `finalizeTransfer()` | `POST /transfer/finalize_transfer` |
+| `initiateBulkTransfer()` | `POST /transfer/bulk` |
+| `fetchTransfer($code)` | `GET /transfer/{code}` |
+| `verifyTransfer($reference)` | `GET /transfer/verify/{reference}` |
+| `exportTransfers()` | `GET /transfer/export` |
+| `resendTransferOtp()` | `POST /transfer/resend_otp` |
+| `disableTransferOtp()` | `POST /transfer/disable_otp` |
+| `finalizeDisableTransferOtp()` | `POST /transfer/disable_otp_finalize` |
+| `enableTransferOtp()` | `POST /transfer/enable_otp` |
+| `balance()` | `GET /balance` |
+| `balanceLedger()` | `GET /balance/ledger` |
+
+### Paystack Payment Requests, Products, Storefronts, Orders, Pages
+
+| Method | Endpoint |
+| --- | --- |
+| `createPaymentRequest()` | `POST /paymentrequest` |
+| `listPaymentRequests()` | `GET /paymentrequest` |
+| `fetchPaymentRequest($id)` | `GET /paymentrequest/{id}` |
+| `updatePaymentRequest($id)` | `PUT /paymentrequest/{id}` |
+| `verifyPaymentRequest($id)` | `GET /paymentrequest/verify/{id}` |
+| `notifyPaymentRequest($id)` | `POST /paymentrequest/notify/{id}` |
+| `paymentRequestTotals()` | `GET /paymentrequest/totals` |
+| `finalizePaymentRequest($id)` | `POST /paymentrequest/finalize/{id}` |
+| `archivePaymentRequest($id)` | `POST /paymentrequest/archive/{id}` |
+| `createProduct()` | `POST /product` |
+| `listProducts()` | `GET /product` |
+| `fetchProduct($id)` | `GET /product/{id}` |
+| `updateProduct($id)` | `PUT /product/{id}` |
+| `deleteProduct($id)` | `DELETE /product/{id}` |
+| `createStorefront()` | `POST /storefront` |
+| `listStorefronts()` | `GET /storefront` |
+| `fetchStorefront($id)` | `GET /storefront/{id}` |
+| `updateStorefront($id)` | `PUT /storefront/{id}` |
+| `deleteStorefront($id)` | `DELETE /storefront/{id}` |
+| `verifyStorefront($slug)` | `GET /storefront/verify/{slug}` |
+| `listStorefrontOrders($id)` | `GET /storefront/{id}/order` |
+| `addStorefrontProducts($id)` | `POST /storefront/{id}/product` |
+| `listStorefrontProducts($id)` | `GET /storefront/{id}/product` |
+| `publishStorefront($id)` | `POST /storefront/{id}/publish` |
+| `duplicateStorefront($id)` | `POST /storefront/{id}/duplicate` |
+| `createOrder()` | `POST /order` |
+| `listOrders()` | `GET /order` |
+| `fetchOrder($id)` | `GET /order/{id}` |
+| `listProductOrders($id)` | `GET /order/product/{id}` |
+| `validateOrder($code)` | `GET /order/{code}/validate` |
+| `createPage()` | `POST /page` |
+| `listPages()` | `GET /page` |
+| `fetchPage($id)` | `GET /page/{id}` |
+| `updatePage($id)` | `PUT /page/{id}` |
+| `checkSlugAvailability($slug)` | `GET /page/check_slug_availability/{slug}` |
+| `addProductsToPage($id)` | `POST /page/{id}/product` |
+
+### Paystack Settlements, Integration, Refunds, Disputes, Verification
+
+| Method | Endpoint |
+| --- | --- |
+| `listSettlements()` | `GET /settlement` |
+| `listSettlementTransactions($id)` | `GET /settlement/{id}/transactions` |
+| `fetchPaymentSessionTimeout()` | `GET /integration/payment_session_timeout` |
+| `updatePaymentSessionTimeout()` | `PUT /integration/payment_session_timeout` |
+| `createRefund()` | `POST /refund` |
+| `listRefunds()` | `GET /refund` |
+| `retryRefundWithCustomerDetails($id)` | `POST /refund/retry_with_customer_details/{id}` |
+| `fetchRefund($id)` | `GET /refund/{id}` |
+| `listDisputes()` | `GET /dispute` |
+| `fetchDispute($id)` | `GET /dispute/{id}` |
+| `updateDispute($id)` | `PUT /dispute/{id}` |
+| `disputeUploadUrl($id)` | `GET /dispute/{id}/upload_url` |
+| `exportDisputes()` | `GET /dispute/export` |
+| `transactionDisputes($id)` | `GET /dispute/transaction/{id}` |
+| `resolveDispute($id)` | `PUT /dispute/{id}/resolve` |
+| `addDisputeEvidence($id)` | `POST /dispute/{id}/evidence` |
+| `listBanks()` | `GET /bank` |
+| `resolveBankAccount()` | `GET /bank/resolve` |
+| `validateBankAccount()` | `POST /bank/validate` |
+| `resolveCardBin($bin)` | `GET /decision/bin/{bin}` |
+| `listCountries()` | `GET /country` |
+| `listAddressVerificationStates()` | `GET /address_verification/states` |
+
 
 ## SasaPay Coverage
 
@@ -475,7 +754,7 @@ class MyTokenProvider implements AccessTokenProvider
 Inject via the manager:
 
 ```php
-$sasapay = app(\NoriaLabs\Payments\PaymentsManager::class)->sasapay(
+$client = app(\NoriaLabs\Payments\PaymentsManager::class)->paystack(
     overrides: [],
     tokenProvider: new MyTokenProvider(),
 );
@@ -483,8 +762,8 @@ $sasapay = app(\NoriaLabs\Payments\PaymentsManager::class)->sasapay(
 
 When you supply a custom token provider:
 
-- the package does not call the provider OAuth token endpoint for that client
-- provider credentials become optional
+- the package does not call a provider OAuth token endpoint or use a configured static secret for that client
+- provider credentials become optional for that runtime client
 - you own token freshness
 
 ## Request Hooks
@@ -537,11 +816,11 @@ The package throws:
 
 ## Async Settlement
 
-For both providers, most important operations are asynchronous.
+For all supported providers, most important operations are asynchronous.
 
 Treat the immediate response as accepted, queued, or processing unless the provider explicitly says otherwise. Final status usually arrives by callback, IPN, transaction-status query, or verification endpoint.
 
-For SasaPay callbacks, verify the callback signature before mutating local order, wallet, or ledger state.
+For SasaPay callbacks and Paystack webhooks, verify the provider signature before mutating local order, wallet, or ledger state.
 
 ## SasaPay Documentation References
 
@@ -557,3 +836,11 @@ The SasaPay endpoint matrix was aligned with the public SasaPay docs:
 - https://docs.sasapay.app/docs/waas/auth/
 - https://docs.sasapay.app/docs/waas/getchannelcodes/
 - https://developer.sasapay.app/docs/apis/callback-security?country=ke
+
+## Paystack Documentation References
+
+The Paystack endpoint matrix and webhook security behavior were aligned with Paystack's public developer docs and official OpenAPI repository:
+
+- https://paystack.com/docs/api
+- https://paystack.com/docs/payments/webhooks/
+- https://github.com/PaystackOSS/openapi
