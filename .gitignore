@@ -1,0 +1,12 @@
+/vendor/
+/node_modules/
+
+/.claude/
+/.phpunit.cache/
+/.phpunit.result.cache
+
+.env
+.env.*
+!.env.example
+
+composer.lock

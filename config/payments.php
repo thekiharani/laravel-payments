@@ -1,0 +1,67 @@
+<?php
+
+return [
+    'http' => [
+        'timeout_seconds' => env('PAYMENTS_TIMEOUT_SECONDS'),
+        'default_headers' => [],
+        'user_agent' => env('PAYMENTS_USER_AGENT'),
+        'cache_store' => env('PAYMENTS_CACHE_STORE'),
+        'cache_ttl_seconds' => env('PAYMENTS_CACHE_TTL_SECONDS'),
+        'retry' => [
+            'max_attempts' => env('PAYMENTS_RETRY_MAX_ATTEMPTS', 1),
+            'retry_methods' => [],
+            'retry_on_statuses' => [],
+            'retry_on_network_error' => false,
+            'base_delay_seconds' => env('PAYMENTS_RETRY_BASE_DELAY_SECONDS', 0),
+            'max_delay_seconds' => env('PAYMENTS_RETRY_MAX_DELAY_SECONDS', 60),
+            'backoff_multiplier' => env('PAYMENTS_RETRY_BACKOFF_MULTIPLIER', 2),
+            'jitter_seconds' => env('PAYMENTS_RETRY_JITTER_SECONDS', 0),
+            'respect_retry_after' => env('PAYMENTS_RETRY_RESPECT_RETRY_AFTER', true),
+        ],
+    ],
+
+    'mpesa' => [
+        'environment' => env('MPESA_ENVIRONMENT', 'sandbox'),
+        'base_url' => env('MPESA_BASE_URL'),
+        'consumer_key' => env('MPESA_CONSUMER_KEY'),
+        'consumer_secret' => env('MPESA_CONSUMER_SECRET'),
+        'token_cache_skew_seconds' => env('MPESA_TOKEN_CACHE_SKEW_SECONDS', 60),
+        'b2c_version' => env('MPESA_B2C_VERSION', 'v1'),
+        'cache_store' => env('MPESA_CACHE_STORE'),
+        'cache_ttl_seconds' => env('MPESA_CACHE_TTL_SECONDS'),
+        'endpoints' => [],
+    ],
+
+    'sasapay' => [
+        'environment' => env('SASAPAY_ENVIRONMENT', 'sandbox'),
+        'base_url' => env('SASAPAY_BASE_URL'),
+        'waas_base_url' => env('SASAPAY_WAAS_BASE_URL'),
+        'client_id' => env('SASAPAY_CLIENT_ID'),
+        'client_secret' => env('SASAPAY_CLIENT_SECRET'),
+        'waas_client_id' => env('SASAPAY_WAAS_CLIENT_ID'),
+        'waas_client_secret' => env('SASAPAY_WAAS_CLIENT_SECRET'),
+        'token_cache_skew_seconds' => env('SASAPAY_TOKEN_CACHE_SKEW_SECONDS', 60),
+        'waas_token_cache_skew_seconds' => env('SASAPAY_WAAS_TOKEN_CACHE_SKEW_SECONDS', 60),
+        'cache_store' => env('SASAPAY_CACHE_STORE'),
+        'cache_ttl_seconds' => env('SASAPAY_CACHE_TTL_SECONDS'),
+        'endpoints' => [],
+        'waas_endpoints' => [],
+        'callback_security' => [
+            'secret_key' => env('SASAPAY_CALLBACK_SECRET_KEY', env('SASAPAY_CLIENT_ID')),
+            'trusted_ips' => env('SASAPAY_CALLBACK_TRUSTED_IPS', [
+                '47.129.43.141',
+                '13.229.247.179',
+                '13.215.155.141',
+                '13.214.60.231',
+                '54.169.74.198',
+                '18.142.226.87',
+                '47.129.243.116',
+                '13.250.110.3',
+                '155.12.30.40',
+                '155.12.30.58',
+            ]),
+            'enforce_ip_whitelist' => env('SASAPAY_CALLBACK_ENFORCE_IP_WHITELIST', false),
+            'verify_signature' => env('SASAPAY_CALLBACK_VERIFY_SIGNATURE', true),
+        ],
+    ],
+];

@@ -1,0 +1,147 @@
+<?php
+
+namespace NoriaLabs\Payments\Support;
+
+use Illuminate\Contracts\Cache\Factory as CacheFactory;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Factory;
+use NoriaLabs\Payments\Contracts\AccessTokenProvider;
+use NoriaLabs\Payments\Exceptions\AuthenticationException;
+use NoriaLabs\Payments\Exceptions\ConfigurationException;
+
+class ClientCredentialsTokenProvider implements AccessTokenProvider
+{
+    private ?AccessToken $cachedToken = null;
+
+    private int $expiresAt = 0;
+
+    /**
+     * @param  array<string, scalar|null>  $query
+     * @param  callable(array<string, mixed>): AccessToken|null  $mapResponse
+     */
+    public function __construct(
+        private readonly Factory $http,
+        private readonly string $tokenUrl,
+        private readonly string $clientId,
+        private readonly string $clientSecret,
+        private readonly ?float $timeoutSeconds = null,
+        private readonly array $query = [],
+        private readonly int $cacheSkewSeconds = 60,
+        private readonly mixed $mapResponse = null,
+    ) {
+    }
+
+    /**
+     * Build a (possibly cache-decorated) token provider from a normalized client config.
+     *
+     * @param  array<string, mixed>  $config
+     */
+    public static function forConfig(
+        Factory $httpFactory,
+        string $tokenUrl,
+        array $config,
+        string $idKey,
+        string $secretKey,
+        string $missingCredentialsMessage,
+        string $cacheSkewKey = 'token_cache_skew_seconds',
+        ?CacheFactory $cacheFactory = null,
+        ?string $cacheKey = null,
+    ): AccessTokenProvider {
+        $clientId = $config[$idKey] ?? null;
+        $clientSecret = $config[$secretKey] ?? null;
+
+        if (empty($clientId) || empty($clientSecret)) {
+            throw new ConfigurationException($missingCredentialsMessage);
+        }
+
+        $skew = (int) ($config[$cacheSkewKey] ?? $config['token_cache_skew_seconds'] ?? 60);
+
+        $provider = new self(
+            http: $httpFactory,
+            tokenUrl: $tokenUrl,
+            clientId: (string) $clientId,
+            clientSecret: (string) $clientSecret,
+            timeoutSeconds: isset($config['timeout_seconds']) ? (float) $config['timeout_seconds'] : null,
+            query: ['grant_type' => 'client_credentials'],
+            cacheSkewSeconds: $skew,
+        );
+
+        $cacheStore = $config['cache_store'] ?? null;
+
+        if ($cacheFactory === null || $cacheStore === null || $cacheStore === false || $cacheKey === null) {
+            return $provider;
+        }
+
+        $repository = $cacheStore === true || $cacheStore === '' || $cacheStore === 'default'
+            ? $cacheFactory->store()
+            : $cacheFactory->store((string) $cacheStore);
+
+        return new CachedAccessTokenProvider(
+            inner: $provider,
+            cache: $repository,
+            cacheKey: $cacheKey,
+            cacheSkewSeconds: $skew,
+            cacheTtlSeconds: isset($config['cache_ttl_seconds']) ? (int) $config['cache_ttl_seconds'] : null,
+        );
+    }
+
+    public function getAccessToken(bool $forceRefresh = false): string
+    {
+        return $this->getToken($forceRefresh)->accessToken;
+    }
+
+    public function clearCache(): void
+    {
+        $this->cachedToken = null;
+        $this->expiresAt = 0;
+    }
+
+    public function getToken(bool $forceRefresh = false): AccessToken
+    {
+        if (! $forceRefresh && $this->cachedToken !== null && time() < $this->expiresAt) {
+            return $this->cachedToken;
+        }
+
+        try {
+            $request = $this->http
+                ->withHeaders([
+                    'Authorization' => 'Basic '.base64_encode($this->clientId.':'.$this->clientSecret),
+                    'Accept' => 'application/json',
+                ]);
+
+            if ($this->timeoutSeconds !== null) {
+                $request = $request->timeout($this->timeoutSeconds);
+            }
+
+            $response = $request->get($this->tokenUrl, array_filter($this->query, static fn ($value) => $value !== null));
+        } catch (ConnectionException $exception) {
+            $message = str_contains(strtolower($exception->getMessage()), 'timed out')
+                ? 'Authentication request timed out.'
+                : 'Unable to obtain access token.';
+
+            throw new AuthenticationException($message, ['exception' => $exception]);
+        }
+
+        $payload = $response->json() ?: [];
+
+        if (! $response->successful()) {
+            throw new AuthenticationException('Authentication request failed.', $payload);
+        }
+
+        $mapper = $this->mapResponse ?? function (array $input): AccessToken {
+            return new AccessToken(
+                accessToken: (string) ($input['access_token'] ?? ''),
+                expiresIn: (int) ($input['expires_in'] ?? 0),
+                tokenType: isset($input['token_type']) ? (string) $input['token_type'] : null,
+                scope: isset($input['scope']) ? (string) $input['scope'] : null,
+                raw: $input,
+            );
+        };
+
+        $token = $mapper($payload);
+        $this->cachedToken = $token;
+        $this->expiresAt = time() + max(0, $token->expiresIn - $this->cacheSkewSeconds);
+
+        return $token;
+    }
+}
