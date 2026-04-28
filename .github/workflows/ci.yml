@@ -61,10 +61,13 @@ jobs:
 
       - name: Determine version bump and create tag
         run: |
-          # The first public release for this package is v0.1.0.
-          if ! LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null); then
+          # The first public release for this package is v0.1.0. Ignore accidental
+          # v0.0.x tags if they exist from earlier workflow attempts.
+          LATEST_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -Ev '^v0\.0\.' | head -n1 || true)
+
+          if [ -z "$LATEST_TAG" ]; then
             NEW_TAG="v0.1.0"
-            echo "Latest tag: none"
+            echo "Latest release tag: none"
             echo "New tag: $NEW_TAG"
 
             git tag "$NEW_TAG"
@@ -72,7 +75,7 @@ jobs:
             exit 0
           fi
 
-          echo "Latest tag: $LATEST_TAG"
+          echo "Latest release tag: $LATEST_TAG"
 
           # Parse current version
           VERSION="${LATEST_TAG#v}"
