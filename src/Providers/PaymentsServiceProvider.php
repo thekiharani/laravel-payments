@@ -5,6 +5,8 @@ namespace NoriaLabs\Payments\Providers;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\ServiceProvider;
+use NoriaLabs\Payments\KcbBuniClient;
+use NoriaLabs\Payments\KcbBuniIpnVerifier;
 use NoriaLabs\Payments\MpesaClient;
 use NoriaLabs\Payments\PaymentsManager;
 use NoriaLabs\Payments\PaystackClient;
@@ -36,6 +38,14 @@ class PaymentsServiceProvider extends ServiceProvider
 
         $this->app->bind(SasaPayCallbackVerifier::class, function ($app): SasaPayCallbackVerifier {
             return $app->make(PaymentsManager::class)->sasapayCallbackVerifier();
+        });
+
+        $this->app->bind(KcbBuniClient::class, function ($app): KcbBuniClient {
+            return $app->make(PaymentsManager::class)->kcbBuni();
+        });
+
+        $this->app->bind(KcbBuniIpnVerifier::class, function ($app): KcbBuniIpnVerifier {
+            return $app->make(PaymentsManager::class)->kcbBuniIpnVerifier();
         });
 
         $this->app->bind(PaystackClient::class, function ($app): PaystackClient {

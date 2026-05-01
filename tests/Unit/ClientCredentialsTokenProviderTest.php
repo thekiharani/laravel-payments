@@ -104,6 +104,29 @@ it('lets callers map non-standard token responses with mapResponse', function ()
     expect($mapped->getAccessToken())->toBe('mapped');
 });
 
+it('supports post form client-credentials token endpoints', function (): void {
+    Http::fake([
+        'https://auth.example.test/post-token' => Http::response(['access_token' => 'posted', 'expires_in' => 3600], 200),
+    ]);
+
+    $provider = new ClientCredentialsTokenProvider(
+        http: Http::getFacadeRoot(),
+        tokenUrl: 'https://auth.example.test/post-token',
+        clientId: 'client',
+        clientSecret: 'secret',
+        method: 'POST',
+        body: ['grant_type' => 'client_credentials'],
+        asForm: true,
+    );
+
+    expect($provider->getAccessToken())->toBe('posted');
+
+    Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+        && $request->url() === 'https://auth.example.test/post-token'
+        && $request['grant_type'] === 'client_credentials'
+        && $request->hasHeader('Authorization', 'Basic '.base64_encode('client:secret')));
+});
+
 it('rejects empty credentials when built via forConfig', function (): void {
     expect(fn () => ClientCredentialsTokenProvider::forConfig(
         httpFactory: Http::getFacadeRoot(),

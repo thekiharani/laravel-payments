@@ -5,9 +5,10 @@ Laravel package for payment providers:
 - M-PESA Daraja
 - SasaPay v1 merchant APIs
 - SasaPay Wallet as a Service (WAAS) v2 APIs
+- KCB Buni APIs
 - Paystack APIs
 
-The package is a Laravel-native HTTP SDK. It registers container bindings, publishes config, obtains and caches OAuth tokens where providers require them, sends authenticated requests, supports retries and hooks, verifies SasaPay callbacks and Paystack webhooks, and throws typed exceptions for HTTP and network failures.
+The package is a Laravel-native HTTP SDK. It registers container bindings, publishes config, obtains and caches OAuth tokens where providers require them, sends authenticated requests, supports retries and hooks, verifies SasaPay callbacks, KCB Buni IPNs, and Paystack webhooks, and throws typed exceptions for HTTP and network failures.
 
 It does not persist transactions, define your application callback controllers, reconcile settlements, or transform provider callback payloads. Your application owns those concerns.
 
@@ -36,6 +37,8 @@ The package registers:
 - `NoriaLabs\Payments\MpesaClient`
 - `NoriaLabs\Payments\SasaPayClient`
 - `NoriaLabs\Payments\SasaPayCallbackVerifier`
+- `NoriaLabs\Payments\KcbBuniClient`
+- `NoriaLabs\Payments\KcbBuniIpnVerifier`
 - `NoriaLabs\Payments\PaystackClient`
 - `NoriaLabs\Payments\PaystackWebhookVerifier`
 
@@ -52,6 +55,7 @@ Top-level sections:
 - `http`
 - `mpesa`
 - `sasapay`
+- `kcb_buni`
 - `paystack`
 
 ### Shared HTTP Config
@@ -110,6 +114,30 @@ Top-level sections:
 | `callback_security.verify_signature` | Verify callback HMAC signatures when using `verifyRequest()` or the middleware. Defaults to `true`; set `SASAPAY_CALLBACK_VERIFY_SIGNATURE=false` only if you intentionally rely on a different callback-authentication control. |
 
 SasaPay production hosts are not hard-coded. The reviewed SasaPay docs document sandbox hosts clearly, but production hosts are created through SasaPay production applications. Provide production `base_url` and `waas_base_url` explicitly.
+
+### KCB Buni Config
+
+| Key | Description |
+| --- | --- |
+| `environment` | Defaults to `uat`, matching the public Buni DevPortal endpoint URLs. |
+| `base_url` | Optional full base URL override. Required for any non-`uat` environment because Buni production URLs are not published in the verified docs. |
+| `token_url` | Optional full OAuth token URL override. |
+| `token_path` | Token path used with `base_url` when `token_url` is unset. Defaults to `/token`. |
+| `consumer_key` | Buni application consumer key. |
+| `consumer_secret` | Buni application consumer secret. |
+| `api_key` | Optional WSO2 `apikey` header value when your subscribed API requires it. The verified M-PESA Express Postman collection used bearer auth without an `apikey` header. |
+| `token_cache_skew_seconds` | Refresh token before expiry by this many seconds. |
+| `cache_store` | Optional KCB Buni-specific token cache store override. |
+| `cache_ttl_seconds` | Optional KCB Buni-specific token cache TTL override. |
+| `endpoints` | Optional endpoint-path overrides keyed by `KcbBuniClient::ENDPOINTS`. |
+| `mpesa_express.route_code` | Required `routeCode` header for `mpesaStkPush()` unless passed per call. Buni's M-PESA Express docs show `207` for M-PESA. |
+| `mpesa_express.operation` | `operation` header for `mpesaStkPush()`. Defaults to the documented `STKPush`. |
+| `ipn_security.public_key` | KCB public key used to verify inbound IPN `Signature` headers with SHA256withRSA. |
+| `ipn_security.trusted_ips` | Optional KCB Buni IPN source IP allowlist. The verified public docs specify signature verification but do not publish a fixed IP list. |
+| `ipn_security.enforce_ip_whitelist` | Reject IPNs from non-allowlisted IPs when using `verifyRequest()` or the middleware. Defaults to `false`. |
+| `ipn_security.verify_signature` | Verify the IPN `Signature` header over the raw request body. Defaults to `true`. |
+
+KCB Buni token acquisition is `POST /token` with HTTP Basic client credentials and `grant_type=client_credentials` as form data. This was verified against the UAT token endpoint: GET returns HTTP 405, while POST reaches OAuth client validation.
 
 ### Paystack Config
 
@@ -186,6 +214,45 @@ $response = $sasapay->waasRequestPayment([
     'currencyCode' => 'KES',
     'transactionDesc' => 'Wallet topup',
     'callbackUrl' => 'https://example.com/sasapay/waas/callback',
+]);
+```
+
+### KCB Buni M-PESA Express
+
+```php
+use NoriaLabs\Payments\KcbBuniClient;
+
+$buni = app(KcbBuniClient::class);
+
+$response = $buni->mpesaStkPush([
+    'phoneNumber' => '254722000000',
+    'amount' => '10',
+    'invoiceNumber' => '1234567-INV001',
+    'sharedShortCode' => true,
+    'orgShortCode' => '',
+    'orgPassKey' => '',
+    'callbackUrl' => 'https://example.com/kcb-buni/ipn',
+    'transactionDescription' => 'school fees',
+], messageId: '232323_KCBOrg_8875661561', routeCode: '207');
+```
+
+### KCB Buni Funds Transfer
+
+```php
+use NoriaLabs\Payments\KcbBuniClient;
+
+$buni = app(KcbBuniClient::class);
+
+$response = $buni->transferFunds([
+    'companyCode' => 'KE0010001',
+    'transactionType' => 'IF',
+    'debitAccountNumber' => '37890012',
+    'creditAccountNumber' => '909099090',
+    'debitAmount' => 10,
+    'paymentDetails' => 'fee payment',
+    'transactionReference' => 'MHSGS7883',
+    'currency' => 'KES',
+    'beneficiaryDetails' => 'JOHN DOE',
 ]);
 ```
 
@@ -298,6 +365,35 @@ Canonical callback fields include documented aliases across C2B, IPN, checkout/c
 
 `third_party_transaction_id` and `sasapay_transaction_id` are intentionally not treated as SasaPay transaction-code aliases. Amount formatting is part of the signature input, so keep the exact provider value, for example `1500.00`.
 
+### KCB Buni IPN Security
+
+KCB Buni IPN docs specify a `Signature` header containing a SHA256withRSA signature of the raw request body, signed by KCB and verified with the KCB public key.
+
+Use the middleware on your IPN route:
+
+```php
+use NoriaLabs\Payments\Http\Middleware\VerifyKcbBuniIpn;
+
+Route::post('/kcb-buni/ipn', KcbBuniIpnController::class)
+    ->middleware(VerifyKcbBuniIpn::class);
+```
+
+Or verify manually:
+
+```php
+use Illuminate\Http\Request;
+use NoriaLabs\Payments\KcbBuniIpnVerifier;
+
+public function __invoke(Request $request, KcbBuniIpnVerifier $verifier)
+{
+    if (! $verifier->verifyRequest($request, enforceIpWhitelist: true, verifySignature: true)) {
+        abort(403);
+    }
+
+    // Process the already-authenticated IPN payload.
+}
+```
+
 ## Manager Usage
 
 Use the manager when you want custom runtime clients instead of the default container bindings:
@@ -319,7 +415,42 @@ $sasapay = $manager->sasapay([
 $paystack = $manager->paystack([
     'secret_key' => config('services.paystack.secret_key'),
 ]);
+
+$buni = $manager->kcbBuni([
+    'base_url' => 'https://your-confirmed-buni-production-host',
+    'consumer_key' => config('services.kcb_buni.consumer_key'),
+    'consumer_secret' => config('services.kcb_buni.consumer_secret'),
+]);
 ```
+
+## KCB Buni Coverage
+
+The KCB Buni client keeps Buni field names exactly as documented. It does not translate `phoneNumber`, `callbackUrl`, `transactionReference`, or nested request payloads. The only automatic payload normalization is string-casting `amount` for `mpesaStkPush()`, matching the Buni M-PESA Express schema.
+
+The verified public DevPortal exposes UAT endpoint URLs. Production hosts are not hard-coded; configure `payments.kcb_buni.base_url` after KCB confirms your production endpoint.
+
+### KCB Buni Auth and IPN
+
+| API | Behavior |
+| --- | --- |
+| `KcbBuniClient::getAccessToken()` | Returns a Buni OAuth token from `POST /token` or a custom token-provider value. |
+| `KcbBuniIpnVerifier::verify()` | Validates raw body/signature/IP checks according to configured or per-call toggles. |
+| `KcbBuniIpnVerifier::verifyRequest()` | Extracts the raw body, `Signature` header, and IP from a Laravel request. |
+| `KcbBuniIpnVerifier::isTrustedIp()` | Checks the configured KCB Buni IPN IP allowlist. |
+| `KcbBuniIpnVerifier::verifiesSignature()` | Shows whether signature verification is enabled by default. |
+| `VerifyKcbBuniIpn` middleware | Rejects invalid Laravel IPN requests with HTTP 403 according to IPN-security config. |
+
+### KCB Buni Outbound APIs
+
+| Method | Verified endpoint |
+| --- | --- |
+| `mpesaStkPush($payload, $messageId)` | `POST /mm/api/request/1.0.0/stkpush` |
+| `transferFunds()` | `POST /fundstransfer/1.0.0/api/v1/transfer` |
+| `queryCoreTransactionStatus()` | `POST /v1/core/t24/querytransaction/1.0.0/api/transactioninfo` |
+| `queryTransactionDetails($identifier)` | `GET /kcb/transaction/query/1.0.0/api/v1/payment/query/{identifier}` |
+| `vendingValidateRequest()` | `POST /kcb/vendingGateway/v1/1.0.0/api/validate-request` |
+| `vendingVendorConfirmation()` | `POST /kcb/vendingGateway/v1/1.0.0/api/vendor-confirmation` |
+| `vendingTransactionStatus()` | `POST /kcb/vendingGateway/v1/1.0.0/api/query/transaction-status` |
 
 ## Paystack Coverage
 
@@ -820,7 +951,16 @@ For all supported providers, most important operations are asynchronous.
 
 Treat the immediate response as accepted, queued, or processing unless the provider explicitly says otherwise. Final status usually arrives by callback, IPN, transaction-status query, or verification endpoint.
 
-For SasaPay callbacks and Paystack webhooks, verify the provider signature before mutating local order, wallet, or ledger state.
+For SasaPay callbacks, KCB Buni IPNs, and Paystack webhooks, verify the provider signature before mutating local order, wallet, or ledger state.
+
+## KCB Buni Documentation References
+
+The KCB Buni endpoint matrix was aligned with the public Buni DevPortal API metadata, OpenAPI documents, and M-PESA Express Postman/PDF artifacts available on May 1, 2026:
+
+- https://buni.kcbgroup.com/discover-apis
+- https://sandbox.buni.kcbgroup.com/api/am/devportal/v3/apis
+- https://sandbox.buni.kcbgroup.com/api/am/devportal/v3/apis/6396efd5-de10-4b04-adec-128f54349614
+- https://sandbox.buni.kcbgroup.com/api/am/devportal/v3/apis/6396efd5-de10-4b04-adec-128f54349614/swagger
 
 ## SasaPay Documentation References
 

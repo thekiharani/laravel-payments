@@ -50,6 +50,25 @@ class PaymentsManager
         return SasaPayCallbackVerifier::make($this->mergedConfig('sasapay', $overrides));
     }
 
+    public function kcbBuni(
+        array $overrides = [],
+        ?AccessTokenProvider $tokenProvider = null,
+        ?Hooks $hooks = null,
+    ): KcbBuniClient {
+        return KcbBuniClient::make(
+            httpFactory: $this->http,
+            config: $this->mergedConfig('kcb_buni', $overrides),
+            tokenProvider: $tokenProvider,
+            hooks: $hooks,
+            cacheFactory: $this->cache,
+        );
+    }
+
+    public function kcbBuniIpnVerifier(array $overrides = []): KcbBuniIpnVerifier
+    {
+        return KcbBuniIpnVerifier::make($this->mergedConfig('kcb_buni', $overrides));
+    }
+
     public function paystack(
         array $overrides = [],
         ?AccessTokenProvider $tokenProvider = null,

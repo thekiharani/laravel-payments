@@ -17,6 +17,7 @@ class ClientCredentialsTokenProvider implements AccessTokenProvider
 
     /**
      * @param  array<string, scalar|null>  $query
+     * @param  array<string, scalar|null>  $body
      * @param  callable(array<string, mixed>): AccessToken|null  $mapResponse
      */
     public function __construct(
@@ -28,6 +29,9 @@ class ClientCredentialsTokenProvider implements AccessTokenProvider
         private readonly array $query = [],
         private readonly int $cacheSkewSeconds = 60,
         private readonly mixed $mapResponse = null,
+        private readonly string $method = 'GET',
+        private readonly array $body = [],
+        private readonly bool $asForm = false,
     ) {
     }
 
@@ -113,7 +117,20 @@ class ClientCredentialsTokenProvider implements AccessTokenProvider
                 $request = $request->timeout($this->timeoutSeconds);
             }
 
-            $response = $request->get($this->tokenUrl, array_filter($this->query, static fn ($value) => $value !== null));
+            $query = array_filter($this->query, static fn ($value) => $value !== null);
+
+            if (strtoupper($this->method) === 'GET') {
+                $response = $request->get($this->tokenUrl, $query);
+            } else {
+                if ($this->asForm) {
+                    $request = $request->asForm();
+                }
+
+                $response = $request->send(strtoupper($this->method), $this->tokenUrl, array_filter([
+                    'query' => $query,
+                    $this->asForm ? 'form_params' : 'json' => array_filter($this->body, static fn ($value) => $value !== null),
+                ], static fn ($value) => $value !== []));
+            }
         } catch (ConnectionException $exception) {
             $message = str_contains(strtolower($exception->getMessage()), 'timed out')
                 ? 'Authentication request timed out.'

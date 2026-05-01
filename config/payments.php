@@ -65,6 +65,30 @@ return [
         ],
     ],
 
+    'kcb_buni' => [
+        'environment' => env('KCB_BUNI_ENVIRONMENT', 'uat'),
+        'base_url' => env('KCB_BUNI_BASE_URL'),
+        'token_url' => env('KCB_BUNI_TOKEN_URL'),
+        'token_path' => env('KCB_BUNI_TOKEN_PATH', '/token'),
+        'consumer_key' => env('KCB_BUNI_CONSUMER_KEY'),
+        'consumer_secret' => env('KCB_BUNI_CONSUMER_SECRET'),
+        'api_key' => env('KCB_BUNI_API_KEY'),
+        'token_cache_skew_seconds' => env('KCB_BUNI_TOKEN_CACHE_SKEW_SECONDS', 60),
+        'cache_store' => env('KCB_BUNI_CACHE_STORE'),
+        'cache_ttl_seconds' => env('KCB_BUNI_CACHE_TTL_SECONDS'),
+        'endpoints' => [],
+        'mpesa_express' => [
+            'route_code' => env('KCB_BUNI_MPESA_ROUTE_CODE'),
+            'operation' => env('KCB_BUNI_MPESA_OPERATION', 'STKPush'),
+        ],
+        'ipn_security' => [
+            'public_key' => env('KCB_BUNI_IPN_PUBLIC_KEY'),
+            'trusted_ips' => env('KCB_BUNI_IPN_TRUSTED_IPS', []),
+            'enforce_ip_whitelist' => env('KCB_BUNI_IPN_ENFORCE_IP_WHITELIST', false),
+            'verify_signature' => env('KCB_BUNI_IPN_VERIFY_SIGNATURE', true),
+        ],
+    ],
+
     'paystack' => [
         'base_url' => env('PAYSTACK_BASE_URL', 'https://api.paystack.co'),
         'secret_key' => env('PAYSTACK_SECRET_KEY'),
