@@ -13,8 +13,7 @@ class Hooks
         public readonly mixed $beforeRequest = null,
         public readonly mixed $afterResponse = null,
         public readonly mixed $onError = null,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<int, callable>

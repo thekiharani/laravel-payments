@@ -32,8 +32,7 @@ class ClientCredentialsTokenProvider implements AccessTokenProvider
         private readonly string $method = 'GET',
         private readonly array $body = [],
         private readonly bool $asForm = false,
-    ) {
-    }
+    ) {}
 
     /**
      * Build a (possibly cache-decorated) token provider from a normalized client config.

@@ -1,3 +1,5 @@
 <?php
 
-uses(\NoriaLabs\Payments\Tests\TestCase::class)->in('Feature', 'Unit');
+use NoriaLabs\Payments\Tests\TestCase;
+
+uses(TestCase::class)->in('Feature', 'Unit');

@@ -93,8 +93,7 @@ class SasaPayClient
         private readonly ?HttpTransport $waasHttp = null,
         private readonly ?AccessTokenProvider $waasTokens = null,
         private readonly array $waasEndpoints = self::WAAS_ENDPOINTS,
-    ) {
-    }
+    ) {}
 
     public static function make(
         Factory $httpFactory,

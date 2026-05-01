@@ -1,8 +1,10 @@
 <?php
 
 use Illuminate\Support\Facades\Http;
+use NoriaLabs\Payments\Contracts\AccessTokenProvider;
 use NoriaLabs\Payments\Exceptions\ConfigurationException;
 use NoriaLabs\Payments\SasaPayClient;
+use NoriaLabs\Payments\Support\HttpTransport;
 use NoriaLabs\Payments\Support\RequestOptions;
 use NoriaLabs\Payments\Support\RetryPolicy;
 
@@ -61,7 +63,8 @@ it('supports per request access token overrides', function (): void {
         ], 200),
     ]);
 
-    $tokenProvider = new class implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $tokenProvider = new class implements AccessTokenProvider
+    {
         public function getAccessToken(bool $forceRefresh = false): string
         {
             throw new RuntimeException('token provider should not be called');
@@ -127,7 +130,8 @@ it('maps documented non waas sasapay endpoints', function (): void {
         ], 200),
     ]);
 
-    $tokenProvider = new class implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $tokenProvider = new class implements AccessTokenProvider
+    {
         public function getAccessToken(bool $forceRefresh = false): string
         {
             return 'token';
@@ -262,7 +266,8 @@ it('maps documented waas endpoints', function (): void {
         ], 200),
     ]);
 
-    $tokenProvider = new class implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $tokenProvider = new class implements AccessTokenProvider
+    {
         public function getAccessToken(bool $forceRefresh = false): string
         {
             return 'token';
@@ -344,7 +349,8 @@ it('honors per-provider endpoint overrides for both v1 and waas', function (): v
         'https://sandbox.sasapay.app/api/v2/waas/custom/send-money' => Http::response(['ResponseCode' => '0'], 200),
     ]);
 
-    $tokenProvider = new class implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $tokenProvider = new class implements AccessTokenProvider
+    {
         public function getAccessToken(bool $forceRefresh = false): string
         {
             return 'token';
@@ -373,7 +379,8 @@ it('uses configured user_agent when default_headers omits one', function (): voi
         'https://sandbox.sasapay.app/api/v1/payments/check-balance/*' => Http::response(['status' => true], 200),
     ]);
 
-    $tokenProvider = new class implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $tokenProvider = new class implements AccessTokenProvider
+    {
         public function getAccessToken(bool $forceRefresh = false): string
         {
             return 'token';
@@ -395,7 +402,8 @@ it('keeps a User-Agent supplied via default_headers and ignores the user_agent f
         'https://sandbox.sasapay.app/api/v1/payments/check-balance/*' => Http::response(['status' => true], 200),
     ]);
 
-    $tokenProvider = new class implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $tokenProvider = new class implements AccessTokenProvider
+    {
         public function getAccessToken(bool $forceRefresh = false): string
         {
             return 'token';
@@ -418,7 +426,8 @@ it('exposes v1 and waas tokens via the client when a custom provider is supplied
         'https://custom.sasapay.test/*' => Http::response(['status' => true], 200),
     ]);
 
-    $tokenProvider = new class implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $tokenProvider = new class implements AccessTokenProvider
+    {
         public function getAccessToken(bool $forceRefresh = false): string
         {
             return $forceRefresh ? 'sasapay-token-fresh' : 'sasapay-token';
@@ -438,7 +447,7 @@ it('exposes v1 and waas tokens via the client when a custom provider is supplied
 it('throws when v1 credentials are missing and no custom token provider is supplied', function (): void {
     expect(fn () => SasaPayClient::make(Http::getFacadeRoot(), [
         'environment' => 'sandbox',
-    ]))->toThrow(\NoriaLabs\Payments\Exceptions\ConfigurationException::class, 'SasaPayClient requires either client_id and client_secret');
+    ]))->toThrow(ConfigurationException::class, 'SasaPayClient requires either client_id and client_secret');
 });
 
 it('throws when shared and waas credentials are both blank', function (): void {
@@ -448,11 +457,12 @@ it('throws when shared and waas credentials are both blank', function (): void {
         'client_secret' => 'secret',
         'waas_client_id' => '',
         'waas_client_secret' => '',
-    ]))->toThrow(\NoriaLabs\Payments\Exceptions\ConfigurationException::class, 'SasaPay WAAS requires either waas_client_id');
+    ]))->toThrow(ConfigurationException::class, 'SasaPay WAAS requires either waas_client_id');
 });
 
 it('throws ConfigurationException when waas methods are called without a waas base url', function (): void {
-    $tokenProvider = new class implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $tokenProvider = new class implements AccessTokenProvider
+    {
         public function getAccessToken(bool $forceRefresh = false): string
         {
             return 'token';
@@ -465,12 +475,13 @@ it('throws ConfigurationException when waas methods are called without a waas ba
     ], $tokenProvider);
 
     expect(fn () => $client->waasChannelCodes())
-        ->toThrow(\NoriaLabs\Payments\Exceptions\ConfigurationException::class, 'SasaPay WAAS production waas_base_url must be provided explicitly.');
+        ->toThrow(ConfigurationException::class, 'SasaPay WAAS production waas_base_url must be provided explicitly.');
 });
 
 it('throws ConfigurationException when waas tokens are absent on direct construction', function (): void {
-    $transport = new \NoriaLabs\Payments\Support\HttpTransport(Http::getFacadeRoot(), 'https://custom.sasapay.test/api/v1');
-    $tokenProvider = new class implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $transport = new HttpTransport(Http::getFacadeRoot(), 'https://custom.sasapay.test/api/v1');
+    $tokenProvider = new class implements AccessTokenProvider
+    {
         public function getAccessToken(bool $forceRefresh = false): string
         {
             return 'token';
@@ -484,7 +495,7 @@ it('throws ConfigurationException when waas tokens are absent on direct construc
     );
 
     expect(fn () => $client->getWaasAccessToken())
-        ->toThrow(\NoriaLabs\Payments\Exceptions\ConfigurationException::class, 'SasaPay WAAS requires either WAAS credentials');
+        ->toThrow(ConfigurationException::class, 'SasaPay WAAS requires either WAAS credentials');
 });
 
 it('exposes b2c, b2b, register_ipn_url, lipa_fare and bulk-payment paths against custom hosts', function (): void {
@@ -493,7 +504,8 @@ it('exposes b2c, b2b, register_ipn_url, lipa_fare and bulk-payment paths against
         'https://custom.sasapay.test/api/v2/waas/*' => Http::response(['status' => true], 200),
     ]);
 
-    $tokenProvider = new class implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $tokenProvider = new class implements AccessTokenProvider
+    {
         public function getAccessToken(bool $forceRefresh = false): string
         {
             return 'token';

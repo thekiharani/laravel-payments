@@ -11,8 +11,7 @@ class VerifyKcbBuniIpn
 {
     public function __construct(
         private readonly KcbBuniIpnVerifier $verifier,
-    ) {
-    }
+    ) {}
 
     public function handle(Request $request, Closure $next): Response
     {

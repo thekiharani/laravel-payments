@@ -20,8 +20,7 @@ class RetryPolicy
         public readonly bool $respectRetryAfter = true,
         public readonly mixed $shouldRetry = null,
         public readonly mixed $sleeper = null,
-    ) {
-    }
+    ) {}
 
     public static function fromArray(array|self|null|false $value): ?self
     {

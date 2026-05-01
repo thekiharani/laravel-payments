@@ -44,8 +44,7 @@ class MpesaClient
         private readonly AccessTokenProvider $tokens,
         private readonly array $endpoints = self::ENDPOINTS,
         private readonly string $defaultB2cVersion = 'v1',
-    ) {
-    }
+    ) {}
 
     public static function make(
         Factory $httpFactory,
@@ -218,7 +217,7 @@ class MpesaClient
 
     public static function buildTimestamp(?\DateTimeInterface $dateTime = null): string
     {
-        return ($dateTime ?? new \DateTimeImmutable())->format('YmdHis');
+        return ($dateTime ?? new \DateTimeImmutable)->format('YmdHis');
     }
 
     public static function buildStkPassword(string $businessShortCode, string $passkey, string $timestamp): string

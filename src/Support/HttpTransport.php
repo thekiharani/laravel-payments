@@ -4,7 +4,6 @@ namespace NoriaLabs\Payments\Support;
 
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
-use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use NoriaLabs\Payments\Exceptions\ApiException;
 use NoriaLabs\Payments\Exceptions\NetworkException;
@@ -22,8 +21,7 @@ class HttpTransport
         private readonly array $defaultHeaders = [],
         private readonly ?RetryPolicy $retry = null,
         private readonly ?Hooks $hooks = null,
-    ) {
-    }
+    ) {}
 
     /**
      * @param  array<string, string>  $headers
@@ -40,7 +38,7 @@ class HttpTransport
     ): mixed {
         $url = $this->appendPath($path);
         $resolvedRetry = $this->resolveRetryPolicy($retry);
-        $maxAttempts = $resolvedRetry?->maxAttempts ?? 1;
+        $maxAttempts = $resolvedRetry->maxAttempts ?? 1;
         $resolvedTimeout = $timeoutSeconds ?? $this->timeoutSeconds;
 
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
@@ -84,6 +82,7 @@ class HttpTransport
 
                 if ($this->shouldRetry($resolvedRetry, $decision)) {
                     $this->sleepBeforeRetry($resolvedRetry, $attempt, null);
+
                     continue;
                 }
 
@@ -130,6 +129,7 @@ class HttpTransport
 
             if ($this->shouldRetry($resolvedRetry, $decision)) {
                 $this->sleepBeforeRetry($resolvedRetry, $attempt, $response);
+
                 continue;
             }
 
@@ -299,13 +299,11 @@ class HttpTransport
             return null;
         }
 
-        $header = $response->header('Retry-After');
+        $header = trim((string) $response->header('Retry-After'));
 
-        if (! is_string($header) || $header === '') {
+        if ($header === '') {
             return null;
         }
-
-        $header = trim($header);
 
         if (is_numeric($header)) {
             return max(0.0, (float) $header);

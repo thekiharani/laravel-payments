@@ -953,6 +953,21 @@ Treat the immediate response as accepted, queued, or processing unless the provi
 
 For SasaPay callbacks, KCB Buni IPNs, and Paystack webhooks, verify the provider signature before mutating local order, wallet, or ledger state.
 
+## Development Quality
+
+Run the same quality gates locally that CI enforces:
+
+```bash
+composer quality
+
+# Or run each gate separately:
+composer format:test
+composer analyse
+composer test:coverage
+```
+
+Use `composer format` to apply Laravel Pint formatting.
+
 ## KCB Buni Documentation References
 
 The KCB Buni endpoint matrix was aligned with the public Buni DevPortal API metadata, OpenAPI documents, and M-PESA Express Postman/PDF artifacts available on May 1, 2026:

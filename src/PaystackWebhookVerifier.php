@@ -22,8 +22,7 @@ class PaystackWebhookVerifier
         private readonly array $trustedIps = self::TRUSTED_WEBHOOK_IPS,
         private readonly bool $enforceIpWhitelist = false,
         private readonly bool $verifySignature = true,
-    ) {
-    }
+    ) {}
 
     public static function make(array $config = []): self
     {

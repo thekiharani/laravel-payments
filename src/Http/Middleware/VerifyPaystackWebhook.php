@@ -11,8 +11,7 @@ class VerifyPaystackWebhook
 {
     public function __construct(
         private readonly PaystackWebhookVerifier $verifier,
-    ) {
-    }
+    ) {}
 
     public function handle(Request $request, Closure $next): Response
     {

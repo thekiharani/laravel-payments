@@ -8,10 +8,9 @@ use NoriaLabs\Payments\Support\Hooks;
 
 function mpesaTokenProvider(string $token = 'mpesa-token'): AccessTokenProvider
 {
-    return new class($token) implements AccessTokenProvider {
-        public function __construct(private readonly string $token)
-        {
-        }
+    return new class($token) implements AccessTokenProvider
+    {
+        public function __construct(private readonly string $token) {}
 
         public function getAccessToken(bool $forceRefresh = false): string
         {
@@ -73,7 +72,8 @@ it('supports external token providers hooks and request headers', function (): v
 
     $calls = 0;
 
-    $tokenProvider = new class($calls) implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $tokenProvider = new class($calls) implements AccessTokenProvider
+    {
         public int $calls = 0;
 
         public function __construct(int &$calls)
@@ -128,7 +128,8 @@ it('maps every supported daraja product endpoint without reshaping payloads', fu
         'https://custom.safaricom.test/*' => Http::response(['ResponseCode' => '0'], 200),
     ]);
 
-    $tokenProvider = new class implements \NoriaLabs\Payments\Contracts\AccessTokenProvider {
+    $tokenProvider = new class implements AccessTokenProvider
+    {
         public function getAccessToken(bool $forceRefresh = false): string
         {
             return 'mapped-token';

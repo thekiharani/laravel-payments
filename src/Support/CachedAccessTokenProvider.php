@@ -13,8 +13,7 @@ class CachedAccessTokenProvider implements AccessTokenProvider
         private readonly string $cacheKey,
         private readonly int $cacheSkewSeconds = 60,
         private readonly ?int $cacheTtlSeconds = null,
-    ) {
-    }
+    ) {}
 
     public function getAccessToken(bool $forceRefresh = false): string
     {

@@ -1,9 +1,9 @@
 <?php
 
-use Illuminate\Support\Facades\Http;
 use Illuminate\Cache\CacheManager;
-use Illuminate\Foundation\Application;
 use Illuminate\Config\Repository;
+use Illuminate\Foundation\Application;
+use Illuminate\Support\Facades\Http;
 use NoriaLabs\Payments\Contracts\AccessTokenProvider;
 use NoriaLabs\Payments\Exceptions\ConfigurationException;
 use NoriaLabs\Payments\KcbBuniClient;
@@ -12,10 +12,9 @@ use NoriaLabs\Payments\Support\RequestOptions;
 
 function kcbBuniTokenProvider(string $token = 'kcb-token'): AccessTokenProvider
 {
-    return new class($token) implements AccessTokenProvider {
-        public function __construct(private readonly string $token)
-        {
-        }
+    return new class($token) implements AccessTokenProvider
+    {
+        public function __construct(private readonly string $token) {}
 
         public function getAccessToken(bool $forceRefresh = false): string
         {
@@ -26,7 +25,7 @@ function kcbBuniTokenProvider(string $token = 'kcb-token'): AccessTokenProvider
 
 function kcbBuniArrayCacheFactory(): CacheManager
 {
-    $app = new Application();
+    $app = new Application;
     $app['config'] = new Repository([
         'cache' => [
             'default' => 'array',

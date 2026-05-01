@@ -213,8 +213,7 @@ class PaystackClient
         private readonly HttpTransport $http,
         private readonly AccessTokenProvider $tokens,
         private readonly array $endpoints = self::ENDPOINTS,
-    ) {
-    }
+    ) {}
 
     public static function make(
         Factory $httpFactory,

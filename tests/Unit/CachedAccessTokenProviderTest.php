@@ -11,12 +11,12 @@ use NoriaLabs\Payments\Support\ClientCredentialsTokenProvider;
 
 function arrayCacheRepository(): Repository
 {
-    return new Repository(new ArrayStore());
+    return new Repository(new ArrayStore);
 }
 
 function arrayCacheFactory(): CacheManager
 {
-    $app = new Application();
+    $app = new Application;
     $app['config'] = new Illuminate\Config\Repository([
         'cache' => [
             'default' => 'array',
@@ -68,10 +68,9 @@ it('shares a token across instances via the laravel cache', function (): void {
 it('caches a generic AccessTokenProvider by writing the returned string', function (): void {
     $calls = 0;
 
-    $inner = new class($calls) implements AccessTokenProvider {
-        public function __construct(public int &$calls)
-        {
-        }
+    $inner = new class($calls) implements AccessTokenProvider
+    {
+        public function __construct(public int &$calls) {}
 
         public function getAccessToken(bool $forceRefresh = false): string
         {
@@ -127,10 +126,9 @@ it('does not write to cache when the resolved ttl is zero or negative', function
 it('does not cache a generic AccessTokenProvider when no ttl is configured', function (): void {
     $calls = 0;
 
-    $inner = new class($calls) implements AccessTokenProvider {
-        public function __construct(public int &$calls)
-        {
-        }
+    $inner = new class($calls) implements AccessTokenProvider
+    {
+        public function __construct(public int &$calls) {}
 
         public function getAccessToken(bool $forceRefresh = false): string
         {

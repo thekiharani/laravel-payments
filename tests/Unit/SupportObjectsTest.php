@@ -50,7 +50,7 @@ it('normalizes single callables and arrays of callables in Hooks', function (): 
         onError: [$callable],
     );
 
-    expect((new Hooks())->beforeRequestCallbacks())->toBe([])
+    expect((new Hooks)->beforeRequestCallbacks())->toBe([])
         ->and($hooks->beforeRequestCallbacks())->toHaveCount(1)
         ->and($hooks->afterResponseCallbacks())->toHaveCount(1)
         ->and($hooks->onErrorCallbacks())->toHaveCount(1);

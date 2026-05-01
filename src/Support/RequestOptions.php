@@ -13,8 +13,7 @@ class RequestOptions
         public readonly RetryPolicy|false|null $retry = null,
         public readonly ?string $accessToken = null,
         public readonly bool $forceTokenRefresh = false,
-    ) {
-    }
+    ) {}
 
     public static function fromArray(array|self|null $value): self
     {
@@ -23,7 +22,7 @@ class RequestOptions
         }
 
         if ($value === null) {
-            return new self();
+            return new self;
         }
 
         return new self(

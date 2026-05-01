@@ -10,6 +10,5 @@ class AccessToken
         public readonly ?string $tokenType = null,
         public readonly ?string $scope = null,
         public readonly array $raw = [],
-    ) {
-    }
+    ) {}
 }

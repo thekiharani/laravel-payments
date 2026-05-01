@@ -11,8 +11,7 @@ class VerifySasaPayCallback
 {
     public function __construct(
         private readonly SasaPayCallbackVerifier $verifier,
-    ) {
-    }
+    ) {}
 
     public function handle(Request $request, Closure $next): Response
     {

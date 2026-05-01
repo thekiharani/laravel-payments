@@ -9,10 +9,9 @@ use NoriaLabs\Payments\Support\RequestOptions;
 
 function paystackTokenProvider(string $token = 'sk_test_provider'): AccessTokenProvider
 {
-    return new class($token) implements AccessTokenProvider {
-        public function __construct(private readonly string $token)
-        {
-        }
+    return new class($token) implements AccessTokenProvider
+    {
+        public function __construct(private readonly string $token) {}
 
         public function getAccessToken(bool $forceRefresh = false): string
         {

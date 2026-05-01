@@ -14,8 +14,7 @@ class PaymentsManager
         private readonly Factory $http,
         private readonly Repository $config,
         private readonly ?CacheFactory $cache = null,
-    ) {
-    }
+    ) {}
 
     public function mpesa(
         array $overrides = [],

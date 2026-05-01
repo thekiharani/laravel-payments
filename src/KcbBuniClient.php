@@ -39,8 +39,7 @@ class KcbBuniClient
         private readonly AccessTokenProvider $tokens,
         private readonly array $endpoints = self::ENDPOINTS,
         private readonly array $mpesaExpress = [],
-    ) {
-    }
+    ) {}
 
     public static function make(
         Factory $httpFactory,

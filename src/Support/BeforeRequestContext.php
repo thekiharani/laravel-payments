@@ -14,6 +14,5 @@ class BeforeRequestContext
         public array $headers,
         public mixed $body,
         public int $attempt,
-    ) {
-    }
+    ) {}
 }

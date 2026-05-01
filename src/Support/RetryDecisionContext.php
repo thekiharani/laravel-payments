@@ -15,6 +15,5 @@ class RetryDecisionContext
         public readonly mixed $error = null,
         public readonly ?Response $response = null,
         public readonly mixed $responseBody = null,
-    ) {
-    }
+    ) {}
 }

@@ -16,8 +16,7 @@ class KcbBuniIpnVerifier
         private readonly array $trustedIps = [],
         private readonly bool $enforceIpWhitelist = false,
         private readonly bool $verifySignature = true,
-    ) {
-    }
+    ) {}
 
     public static function make(array $config = []): self
     {
