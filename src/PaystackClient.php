@@ -242,6 +242,33 @@ class PaystackClient
         return $this->tokens->getAccessToken($forceRefresh);
     }
 
+    public function authorizedPost(string $path, array $payload = [], array|RequestOptions|null $options = null): mixed
+    {
+        return $this->sendRawAuthorized($path, 'POST', $payload, [], $options);
+    }
+
+    public function authorizedGet(
+        string $path,
+        array $query = [],
+        array|RequestOptions|null $options = null,
+    ): mixed {
+        return $this->sendRawAuthorized($path, 'GET', null, $query, $options);
+    }
+
+    public function authorizedPut(string $path, array $payload = [], array|RequestOptions|null $options = null): mixed
+    {
+        return $this->sendRawAuthorized($path, 'PUT', $payload, [], $options);
+    }
+
+    public function authorizedDelete(
+        string $path,
+        ?array $payload = null,
+        array $query = [],
+        array|RequestOptions|null $options = null,
+    ): mixed {
+        return $this->sendRawAuthorized($path, 'DELETE', $payload, $query, $options);
+    }
+
     public function initializeTransaction(array $payload, array|RequestOptions|null $options = null): mixed
     {
         return $this->sendAuthorized('initialize_transaction', payload: $payload, options: $options);
@@ -1058,6 +1085,32 @@ class PaystackClient
     public function listAddressVerificationStates(array $query, array|RequestOptions|null $options = null): mixed
     {
         return $this->sendAuthorized('list_address_verification_states', query: $query, options: $options);
+    }
+
+    private function sendRawAuthorized(
+        string $path,
+        string $method,
+        ?array $payload,
+        array $query,
+        array|RequestOptions|null $options,
+    ): mixed {
+        $requestOptions = RequestOptions::fromArray($options);
+        $token = $requestOptions->accessToken ?? $this->tokens->getAccessToken($requestOptions->forceTokenRefresh);
+
+        $headers = array_merge($requestOptions->headers, [
+            'Authorization' => "Bearer {$token}",
+            'Accept' => 'application/json',
+        ]);
+
+        return $this->http->send(
+            path: $path,
+            method: $method,
+            headers: $headers,
+            query: $query,
+            body: $payload,
+            timeoutSeconds: $requestOptions->timeoutSeconds,
+            retry: $requestOptions->retry,
+        );
     }
 
     private function sendAuthorized(

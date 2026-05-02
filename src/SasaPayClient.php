@@ -152,7 +152,7 @@ class SasaPayClient
             waasHttp: $waasTransport,
             waasTokens: $waasTokens,
             waasEndpoints: self::resolveEndpoints($config, 'waas_endpoints', self::WAAS_ENDPOINTS),
-            amountNormalization: self::resolveAmountNormalization($config['amount_normalization'] ?? null),
+            amountNormalization: Payload::resolveAmountNormalization($config['amount_normalization'] ?? null),
             paymentDefaults: self::resolveDefaults($config, 'payment_defaults', ['MerchantCode', 'Currency', 'CallBackURL']),
             waasPaymentDefaults: self::resolveDefaults($config, 'waas_payment_defaults', ['merchantCode', 'currencyCode', 'callbackUrl']),
         );
@@ -662,13 +662,8 @@ class SasaPayClient
     private function withAmount(array $payload, array|RequestOptions|null $options): array
     {
         $requestOptions = RequestOptions::fromArray($options);
-        $normalization = self::resolveAmountNormalization($requestOptions->amountNormalization ?? $this->amountNormalization);
 
-        if ($normalization === 'none') {
-            return $payload;
-        }
-
-        return Payload::stringifyAmount($payload);
+        return Payload::normalizeAmount($payload, $requestOptions->amountNormalization ?? $this->amountNormalization);
     }
 
     private function withPaymentDefaults(array $payload): array
@@ -829,16 +824,6 @@ class SasaPayClient
         }
 
         return $endpoints;
-    }
-
-    private static function resolveAmountNormalization(mixed $value): string
-    {
-        $normalized = strtolower((string) ($value ?? 'string'));
-
-        return match ($normalized) {
-            'none', 'raw', 'preserve' => 'none',
-            default => 'string',
-        };
     }
 
     /**

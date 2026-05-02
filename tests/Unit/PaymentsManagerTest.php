@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Support\Facades\Http;
 use NoriaLabs\Payments\Contracts\AccessTokenProvider;
 use NoriaLabs\Payments\Facades\Payments;
 use NoriaLabs\Payments\KcbBuniClient;
@@ -64,4 +65,37 @@ it('builds provider clients and verifiers via the manager and the container', fu
         ->and(Payments::paystackWebhookVerifier([
             'webhook_security' => ['verify_signature' => false],
         ]))->toBeInstanceOf(PaystackWebhookVerifier::class);
+});
+
+it('lets provider null config values inherit shared http defaults', function (): void {
+    config()->set('cache.default', 'array');
+    config()->set('cache.stores.array', ['driver' => 'array']);
+    config()->set('cache.prefix', '');
+    config()->set('payments.http.cache_store', 'array');
+    config()->set('payments.http.cache_ttl_seconds', 600);
+    config()->set('payments.mpesa.consumer_key', 'consumer');
+    config()->set('payments.mpesa.consumer_secret', 'secret');
+    config()->set('payments.mpesa.cache_store', null);
+    config()->set('payments.mpesa.cache_ttl_seconds', null);
+
+    Http::fake([
+        'https://sandbox.safaricom.co.ke/oauth/v1/generate*' => Http::response([
+            'access_token' => 'shared-cache-token',
+            'expires_in' => 3600,
+        ], 200),
+        'https://sandbox.safaricom.co.ke/mpesa/stkpushquery/v1/query' => Http::response([
+            'ResponseCode' => '0',
+        ], 200),
+    ]);
+
+    $manager = app(PaymentsManager::class);
+
+    $manager->mpesa()->stkPushQuery(['CheckoutRequestID' => 'first']);
+    $manager->mpesa()->stkPushQuery(['CheckoutRequestID' => 'second']);
+
+    $tokenRequests = collect(Http::recorded())
+        ->filter(fn (array $record): bool => str_starts_with($record[0]->url(), 'https://sandbox.safaricom.co.ke/oauth/v1/generate'))
+        ->count();
+
+    expect($tokenRequests)->toBe(1);
 });

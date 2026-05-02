@@ -5,6 +5,7 @@ use NoriaLabs\Payments\Contracts\AccessTokenProvider;
 use NoriaLabs\Payments\Exceptions\ConfigurationException;
 use NoriaLabs\Payments\MpesaClient;
 use NoriaLabs\Payments\Support\Hooks;
+use NoriaLabs\Payments\Support\RequestOptions;
 
 function mpesaTokenProvider(string $token = 'mpesa-token'): AccessTokenProvider
 {
@@ -148,7 +149,8 @@ it('maps every supported daraja product endpoint without reshaping payloads', fu
 
     $client->stkPush(['Amount' => 1, 'AccountReference' => 'INV-001']);
     $client->stkPushQuery(['CheckoutRequestID' => 'checkout']);
-    $client->registerC2BUrls(['ShortCode' => '600000'], version: 'v1');
+    $client->registerC2BUrls(['ShortCode' => '600000']);
+    $client->registerC2BUrlsV1(['ShortCode' => '600000']);
     $client->c2bSimulate(['Amount' => 2, 'BillRefNumber' => 'INV-002']);
     $client->b2cPayment(['Amount' => 3]);
     $client->b2cPayment(['Amount' => 4], version: 'v1');
@@ -174,6 +176,7 @@ it('maps every supported daraja product endpoint without reshaping payloads', fu
     expect($urls)->toContain(
         'https://custom.safaricom.test/mpesa/stkpush/v1/processrequest',
         'https://custom.safaricom.test/mpesa/stkpushquery/v1/query',
+        'https://custom.safaricom.test/mpesa/c2b/v2/registerurl',
         'https://custom.safaricom.test/mpesa/c2b/v1/registerurl',
         'https://custom.safaricom.test/custom/c2b/simulate',
         'https://custom.safaricom.test/mpesa/b2c/v3/paymentrequest',
@@ -198,6 +201,55 @@ it('maps every supported daraja product endpoint without reshaping payloads', fu
     Http::assertSent(fn ($request): bool => ($request->data()['CommandID'] ?? null) === 'BusinessBuyGoods');
     Http::assertSent(fn ($request): bool => ($request->data()['CommandID'] ?? null) === 'CustomCommand'
         && ($request->data()['Amount'] ?? null) === '11');
+});
+
+it('can preserve raw mpesa amount values when normalization is disabled', function (): void {
+    Http::fake([
+        'https://custom.safaricom.test/*' => Http::response(['ResponseCode' => '0'], 200),
+    ]);
+
+    $rawByConfig = MpesaClient::make(Http::getFacadeRoot(), [
+        'base_url' => 'https://custom.safaricom.test',
+        'environment' => 'production',
+        'amount_normalization' => 'none',
+    ], mpesaTokenProvider('raw-token'));
+
+    $rawByConfig->stkPush(['Amount' => 100]);
+
+    $rawByRequest = MpesaClient::make(Http::getFacadeRoot(), [
+        'base_url' => 'https://custom.safaricom.test',
+        'environment' => 'production',
+    ], mpesaTokenProvider('raw-token'));
+
+    $rawByRequest->c2bSimulate(['amount' => 100.50], new RequestOptions(amountNormalization: 'none'));
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://custom.safaricom.test/mpesa/stkpush/v1/processrequest'
+        && $request->data()['Amount'] === 100);
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://custom.safaricom.test/mpesa/c2b/v1/simulate'
+        && $request->data()['amount'] === 100.50);
+});
+
+it('exposes raw authorized mpesa helpers without rewriting payloads', function (): void {
+    Http::fake([
+        'https://custom.safaricom.test/custom/raw' => Http::response(['status' => 'posted'], 200),
+        'https://custom.safaricom.test/custom/raw-get*' => Http::response(['status' => 'fetched'], 200),
+    ]);
+
+    $client = MpesaClient::make(Http::getFacadeRoot(), [
+        'base_url' => 'https://custom.safaricom.test',
+        'environment' => 'production',
+    ], mpesaTokenProvider('helper-token'));
+
+    expect($client->authorizedPost('/custom/raw', ['Amount' => 100])['status'])->toBe('posted')
+        ->and($client->authorizedGet('/custom/raw-get', ['Receipt' => 'ABC123'])['status'])->toBe('fetched');
+
+    Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+        && $request->url() === 'https://custom.safaricom.test/custom/raw'
+        && $request->data()['Amount'] === 100
+        && $request->hasHeader('Authorization', 'Bearer helper-token'));
+    Http::assertSent(fn ($request): bool => $request->method() === 'GET'
+        && $request->url() === 'https://custom.safaricom.test/custom/raw-get?Receipt=ABC123'
+        && $request->hasHeader('Authorization', 'Bearer helper-token'));
 });
 
 it('uses the configured user_agent when default_headers omits one', function (): void {

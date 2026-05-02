@@ -293,6 +293,38 @@ it('sends authenticated requests with configured headers and request options', f
         && $request->hasHeader('X-Request-Id', 'req_456'));
 });
 
+it('exposes raw authorized paystack helpers without rewriting payloads', function (): void {
+    Http::fake([
+        'https://api.paystack.co/custom/raw' => Http::response(['status' => true, 'method' => 'post'], 200),
+        'https://api.paystack.co/custom/raw-get*' => Http::response(['status' => true, 'method' => 'get'], 200),
+        'https://api.paystack.co/custom/raw-put' => Http::response(['status' => true, 'method' => 'put'], 200),
+        'https://api.paystack.co/custom/raw-delete*' => Http::response(['status' => true, 'method' => 'delete'], 200),
+    ]);
+
+    $client = paystackClient(tokenProvider: paystackTokenProvider('raw_token'));
+
+    expect($client->authorizedPost('/custom/raw', ['amount' => 10000])['method'])->toBe('post')
+        ->and($client->authorizedGet('/custom/raw-get', ['reference' => 'ref_123'])['method'])->toBe('get')
+        ->and($client->authorizedPut('/custom/raw-put', ['amount' => 20000])['method'])->toBe('put')
+        ->and($client->authorizedDelete('/custom/raw-delete', ['amount' => 5000], ['reference' => 'ref_456'])['method'])->toBe('delete');
+
+    Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+        && $request->url() === 'https://api.paystack.co/custom/raw'
+        && $request->data()['amount'] === 10000
+        && $request->hasHeader('Authorization', 'Bearer raw_token'));
+    Http::assertSent(fn ($request): bool => $request->method() === 'GET'
+        && $request->url() === 'https://api.paystack.co/custom/raw-get?reference=ref_123'
+        && $request->hasHeader('Authorization', 'Bearer raw_token'));
+    Http::assertSent(fn ($request): bool => $request->method() === 'PUT'
+        && $request->url() === 'https://api.paystack.co/custom/raw-put'
+        && $request->data()['amount'] === 20000
+        && $request->hasHeader('Authorization', 'Bearer raw_token'));
+    Http::assertSent(fn ($request): bool => $request->method() === 'DELETE'
+        && $request->url() === 'https://api.paystack.co/custom/raw-delete?reference=ref_456'
+        && $request->data()['amount'] === 5000
+        && $request->hasHeader('Authorization', 'Bearer raw_token'));
+});
+
 it('keeps an explicit User-Agent header over the user_agent fallback', function (): void {
     Http::fake([
         'https://api.paystack.co/balance' => Http::response(['status' => true], 200),

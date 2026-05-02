@@ -91,6 +91,61 @@ it('requests a documented post client-credentials token and sends mpesa stk push
     });
 });
 
+it('can preserve raw kcb buni mpesa express amount values when normalization is disabled', function (): void {
+    Http::fake([
+        'https://uat.buni.kcbgroup.com/mm/api/request/1.0.0/stkpush' => Http::response([
+            'header' => ['statusCode' => '0'],
+        ], 200),
+    ]);
+
+    $rawByConfig = KcbBuniClient::make(Http::getFacadeRoot(), [
+        'environment' => 'uat',
+        'amount_normalization' => 'none',
+    ], kcbBuniTokenProvider('raw-token'));
+
+    $rawByConfig->mpesaStkPush(['amount' => 10.50], 'message-config', routeCode: '207');
+
+    $rawByRequest = KcbBuniClient::make(Http::getFacadeRoot(), [
+        'environment' => 'uat',
+    ], kcbBuniTokenProvider('raw-token'));
+
+    $rawByRequest->mpesaStkPush(
+        ['amount' => 100],
+        'message-request',
+        new RequestOptions(amountNormalization: 'none'),
+        routeCode: '207',
+    );
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://uat.buni.kcbgroup.com/mm/api/request/1.0.0/stkpush'
+        && $request->hasHeader('messageId', 'message-config')
+        && $request->data()['amount'] === 10.50);
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://uat.buni.kcbgroup.com/mm/api/request/1.0.0/stkpush'
+        && $request->hasHeader('messageId', 'message-request')
+        && $request->data()['amount'] === 100);
+});
+
+it('exposes raw authorized kcb buni helpers without rewriting payloads', function (): void {
+    Http::fake([
+        'https://uat.buni.kcbgroup.com/custom/raw' => Http::response(['status' => 'posted'], 200),
+        'https://uat.buni.kcbgroup.com/custom/raw-get*' => Http::response(['status' => 'fetched'], 200),
+    ]);
+
+    $client = KcbBuniClient::make(Http::getFacadeRoot(), [
+        'environment' => 'uat',
+    ], kcbBuniTokenProvider('helper-token'));
+
+    expect($client->authorizedPost('/custom/raw', ['amount' => 10])['status'])->toBe('posted')
+        ->and($client->authorizedGet('/custom/raw-get', ['transactionReference' => 'ABC123'])['status'])->toBe('fetched');
+
+    Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+        && $request->url() === 'https://uat.buni.kcbgroup.com/custom/raw'
+        && $request->data()['amount'] === 10
+        && $request->hasHeader('Authorization', 'Bearer helper-token'));
+    Http::assertSent(fn ($request): bool => $request->method() === 'GET'
+        && $request->url() === 'https://uat.buni.kcbgroup.com/custom/raw-get?transactionReference=ABC123'
+        && $request->hasHeader('Authorization', 'Bearer helper-token'));
+});
+
 it('supports cached tokens custom token urls endpoint overrides and preserved default headers', function (): void {
     Http::fake([
         'https://auth.buni.test/oauth2/token' => Http::response([

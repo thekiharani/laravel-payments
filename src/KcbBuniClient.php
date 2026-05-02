@@ -39,6 +39,7 @@ class KcbBuniClient
         private readonly AccessTokenProvider $tokens,
         private readonly array $endpoints = self::ENDPOINTS,
         private readonly array $mpesaExpress = [],
+        private readonly string $amountNormalization = 'string',
     ) {}
 
     public static function make(
@@ -64,6 +65,7 @@ class KcbBuniClient
             tokens: $tokenProvider ?? self::tokenProvider($httpFactory, $config, $baseUrl, $cacheFactory),
             endpoints: self::resolveEndpoints($config),
             mpesaExpress: (array) ($config['mpesa_express'] ?? []),
+            amountNormalization: Payload::resolveAmountNormalization($config['amount_normalization'] ?? null),
         );
     }
 
@@ -87,10 +89,23 @@ class KcbBuniClient
         return $this->authorizedRequest(
             path: $this->endpoint('mpesa_stk_push'),
             method: 'POST',
-            payload: Payload::stringifyAmount($payload),
+            payload: $this->withAmount($payload, $requestOptions),
             query: null,
             options: $requestOptions,
         );
+    }
+
+    public function authorizedPost(string $path, array $payload = [], array|RequestOptions|null $options = null): mixed
+    {
+        return $this->authorizedRequest($path, 'POST', $payload, null, $options);
+    }
+
+    public function authorizedGet(
+        string $path,
+        array $query = [],
+        array|RequestOptions|null $options = null,
+    ): mixed {
+        return $this->authorizedRequest($path, 'GET', null, $query, $options);
     }
 
     public function transferFunds(array $payload, array|RequestOptions|null $options = null): mixed
@@ -192,7 +207,15 @@ class KcbBuniClient
             retry: $requestOptions->retry,
             accessToken: $requestOptions->accessToken,
             forceTokenRefresh: $requestOptions->forceTokenRefresh,
+            amountNormalization: $requestOptions->amountNormalization,
         );
+    }
+
+    private function withAmount(array $payload, array|RequestOptions|null $options): array
+    {
+        $requestOptions = RequestOptions::fromArray($options);
+
+        return Payload::normalizeAmount($payload, $requestOptions->amountNormalization ?? $this->amountNormalization);
     }
 
     private static function tokenProvider(

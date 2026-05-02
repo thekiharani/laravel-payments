@@ -44,6 +44,7 @@ class MpesaClient
         private readonly AccessTokenProvider $tokens,
         private readonly array $endpoints = self::ENDPOINTS,
         private readonly string $defaultB2cVersion = 'v1',
+        private readonly string $amountNormalization = 'string',
     ) {}
 
     public static function make(
@@ -81,6 +82,7 @@ class MpesaClient
             tokens: $tokens,
             endpoints: $endpoints,
             defaultB2cVersion: (string) ($config['b2c_version'] ?? 'v1'),
+            amountNormalization: Payload::resolveAmountNormalization($config['amount_normalization'] ?? null),
         );
     }
 
@@ -91,7 +93,7 @@ class MpesaClient
 
     public function stkPush(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('stk_push'), $this->withAmount($payload), $options);
+        return $this->authorizedRequest($this->endpoint('stk_push'), $this->withAmount($payload, $options), $options);
     }
 
     public function stkPushQuery(array $payload, array|RequestOptions|null $options = null): mixed
@@ -104,12 +106,21 @@ class MpesaClient
         string $version = 'v2',
         array|RequestOptions|null $options = null,
     ): mixed {
-        return $this->authorizedRequest($this->endpoint('c2b_register_url', ['version' => $version]), $payload, $options);
+        return $this->authorizedRequest(
+            $this->endpoint('c2b_register_url', ['version' => $version]),
+            $payload,
+            $options,
+        );
+    }
+
+    public function registerC2BUrlsV1(array $payload, array|RequestOptions|null $options = null): mixed
+    {
+        return $this->registerC2BUrls($payload, 'v1', $options);
     }
 
     public function c2bSimulate(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('c2b_simulate'), $this->withAmount($payload), $options);
+        return $this->authorizedRequest($this->endpoint('c2b_simulate'), $this->withAmount($payload, $options), $options);
     }
 
     public function b2cPayment(
@@ -119,7 +130,7 @@ class MpesaClient
     ): mixed {
         return $this->authorizedRequest(
             $this->endpoint('b2c_payment', ['version' => $version ?? $this->defaultB2cVersion]),
-            $this->withAmount($payload),
+            $this->withAmount($payload, $options),
             $options,
         );
     }
@@ -131,14 +142,14 @@ class MpesaClient
 
     public function b2bPayment(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('b2b_payment'), $this->withAmount($payload), $options);
+        return $this->authorizedRequest($this->endpoint('b2b_payment'), $this->withAmount($payload, $options), $options);
     }
 
     public function b2cAccountTopUp(array $payload, array|RequestOptions|null $options = null): mixed
     {
         return $this->authorizedRequest(
             $this->endpoint('b2b_payment'),
-            $this->withAmount($this->withCommand($payload, 'BusinessPayToBulk')),
+            $this->withAmount($this->withCommand($payload, 'BusinessPayToBulk'), $options),
             $options,
         );
     }
@@ -147,7 +158,7 @@ class MpesaClient
     {
         return $this->authorizedRequest(
             $this->endpoint('b2b_payment'),
-            $this->withAmount($this->withCommand($payload, 'BusinessPayBill')),
+            $this->withAmount($this->withCommand($payload, 'BusinessPayBill'), $options),
             $options,
         );
     }
@@ -156,7 +167,7 @@ class MpesaClient
     {
         return $this->authorizedRequest(
             $this->endpoint('b2b_payment'),
-            $this->withAmount($this->withCommand($payload, 'BusinessBuyGoods')),
+            $this->withAmount($this->withCommand($payload, 'BusinessBuyGoods'), $options),
             $options,
         );
     }
@@ -165,14 +176,14 @@ class MpesaClient
     {
         return $this->authorizedRequest(
             $this->endpoint('b2b_express_checkout'),
-            $this->withAmount($payload),
+            $this->withAmount($payload, $options),
             $options,
         );
     }
 
     public function reversal(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('reversal'), $this->withAmount($payload), $options);
+        return $this->authorizedRequest($this->endpoint('reversal'), $this->withAmount($payload, $options), $options);
     }
 
     public function transactionStatus(array $payload, array|RequestOptions|null $options = null): mixed
@@ -187,12 +198,12 @@ class MpesaClient
 
     public function generateQrCode(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('dynamic_qr'), $this->withAmount($payload), $options);
+        return $this->authorizedRequest($this->endpoint('dynamic_qr'), $this->withAmount($payload, $options), $options);
     }
 
     public function taxRemittance(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('tax_remittance'), $this->withAmount($payload), $options);
+        return $this->authorizedRequest($this->endpoint('tax_remittance'), $this->withAmount($payload, $options), $options);
     }
 
     public function billManagerOptIn(array $payload, array|RequestOptions|null $options = null): mixed
@@ -202,12 +213,12 @@ class MpesaClient
 
     public function billManagerSingleInvoice(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('bill_manager_single_invoice'), $this->withAmount($payload), $options);
+        return $this->authorizedRequest($this->endpoint('bill_manager_single_invoice'), $this->withAmount($payload, $options), $options);
     }
 
     public function ratibaStandingOrder(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('ratiba_standing_order'), $this->withAmount($payload), $options);
+        return $this->authorizedRequest($this->endpoint('ratiba_standing_order'), $this->withAmount($payload, $options), $options);
     }
 
     public function pullTransactions(array $payload, array|RequestOptions|null $options = null): mixed
@@ -225,8 +236,26 @@ class MpesaClient
         return base64_encode($businessShortCode.$passkey.$timestamp);
     }
 
-    private function authorizedRequest(string $path, array $payload, array|RequestOptions|null $options): mixed
+    public function authorizedPost(string $path, array $payload = [], array|RequestOptions|null $options = null): mixed
     {
+        return $this->authorizedRequest($path, $payload, $options);
+    }
+
+    public function authorizedGet(
+        string $path,
+        array $query = [],
+        array|RequestOptions|null $options = null,
+    ): mixed {
+        return $this->authorizedRequest($path, null, $options, 'GET', $query);
+    }
+
+    private function authorizedRequest(
+        string $path,
+        ?array $payload,
+        array|RequestOptions|null $options,
+        string $method = 'POST',
+        ?array $query = null,
+    ): mixed {
         $requestOptions = RequestOptions::fromArray($options);
         $token = $requestOptions->accessToken ?? $this->tokens->getAccessToken($requestOptions->forceTokenRefresh);
 
@@ -237,17 +266,20 @@ class MpesaClient
 
         return $this->http->send(
             path: $path,
-            method: 'POST',
+            method: $method,
             headers: $headers,
+            query: $query,
             body: $payload,
             timeoutSeconds: $requestOptions->timeoutSeconds,
             retry: $requestOptions->retry,
         );
     }
 
-    private function withAmount(array $payload): array
+    private function withAmount(array $payload, array|RequestOptions|null $options): array
     {
-        return Payload::stringifyAmount($payload);
+        $requestOptions = RequestOptions::fromArray($options);
+
+        return Payload::normalizeAmount($payload, $requestOptions->amountNormalization ?? $this->amountNormalization);
     }
 
     private function withCommand(array $payload, string $commandId): array

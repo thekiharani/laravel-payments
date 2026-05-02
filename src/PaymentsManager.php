@@ -89,8 +89,29 @@ class PaymentsManager
     private function mergedConfig(string $provider, array $overrides): array
     {
         $http = (array) $this->config->get('payments.http', []);
-        $providerConfig = (array) $this->config->get("payments.{$provider}", []);
+        $providerConfig = self::withoutNullValues((array) $this->config->get("payments.{$provider}", []));
 
         return array_replace_recursive($http, $providerConfig, $overrides);
+    }
+
+    /**
+     * @param  array<string, mixed>  $values
+     * @return array<string, mixed>
+     */
+    private static function withoutNullValues(array $values): array
+    {
+        foreach ($values as $key => $value) {
+            if (is_array($value)) {
+                $values[$key] = self::withoutNullValues($value);
+
+                continue;
+            }
+
+            if ($value === null) {
+                unset($values[$key]);
+            }
+        }
+
+        return $values;
     }
 }

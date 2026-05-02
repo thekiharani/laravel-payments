@@ -87,6 +87,7 @@ Top-level sections:
 | `consumer_secret` | Daraja consumer secret. |
 | `token_cache_skew_seconds` | Refresh token before expiry by this many seconds. |
 | `b2c_version` | Default B2C payment API version. Defaults to `v1`; set `MPESA_B2C_VERSION=v3` only when your Daraja app is enabled for the v3 B2C path. |
+| `amount_normalization` | M-PESA amount handling. Defaults to `string`; set to `none` to preserve raw numeric `Amount`/`amount` values. |
 | `cache_store` | Optional M-PESA-specific token cache store override. |
 | `cache_ttl_seconds` | Optional M-PESA-specific token cache TTL override. |
 | `endpoints` | Optional endpoint-path overrides keyed by `MpesaClient::ENDPOINTS`. Useful when Safaricom enables tenant-specific or newer product paths. |
@@ -130,6 +131,7 @@ SasaPay production hosts are not hard-coded. The reviewed SasaPay docs document 
 | `consumer_secret` | Buni application consumer secret. |
 | `api_key` | Optional WSO2 `apikey` header value when your subscribed API requires it. The verified M-PESA Express Postman collection used bearer auth without an `apikey` header. |
 | `token_cache_skew_seconds` | Refresh token before expiry by this many seconds. |
+| `amount_normalization` | KCB Buni M-PESA Express amount handling. Defaults to `string`; set to `none` to preserve raw numeric `amount` values. |
 | `cache_store` | Optional KCB Buni-specific token cache store override. |
 | `cache_ttl_seconds` | Optional KCB Buni-specific token cache TTL override. |
 | `endpoints` | Optional endpoint-path overrides keyed by `KcbBuniClient::ENDPOINTS`. |
@@ -428,7 +430,7 @@ $buni = $manager->kcbBuni([
 
 ## KCB Buni Coverage
 
-The KCB Buni client keeps Buni field names exactly as documented. It does not translate `phoneNumber`, `callbackUrl`, `transactionReference`, or nested request payloads. The only automatic payload normalization is string-casting `amount` for `mpesaStkPush()`, matching the Buni M-PESA Express schema.
+The KCB Buni client keeps Buni field names exactly as documented. It does not translate `phoneNumber`, `callbackUrl`, `transactionReference`, or nested request payloads. The only automatic payload normalization is string-casting `amount` for `mpesaStkPush()` by default, matching the Buni M-PESA Express schema. Set `amount_normalization` to `none` when you need to preserve raw JSON number types.
 
 The verified public DevPortal exposes UAT endpoint URLs. Production hosts are not hard-coded; configure `payments.kcb_buni.base_url` after KCB confirms your production endpoint.
 
@@ -455,6 +457,15 @@ The verified public DevPortal exposes UAT endpoint URLs. Production hosts are no
 | `vendingVendorConfirmation()` | `POST /kcb/vendingGateway/v1/1.0.0/api/vendor-confirmation` |
 | `vendingTransactionStatus()` | `POST /kcb/vendingGateway/v1/1.0.0/api/query/transaction-status` |
 
+### KCB Buni Raw Authorized Helpers
+
+Use these when KCB exposes an endpoint before this package has a named high-level method. They use the same token providers, retries, timeout handling, hooks, and exception mapping as the named APIs and do not normalize or rewrite payloads.
+
+| Method | Behavior |
+| --- | --- |
+| `authorizedPost($path, $payload = [])` | POST on the configured Buni base URL with bearer auth. |
+| `authorizedGet($path, $query = [])` | GET on the configured Buni base URL with bearer auth. |
+
 ## Paystack Coverage
 
 Paystack uses one API host for test and live mode: `https://api.paystack.co`. The secret key determines the environment. The client keeps Paystack field names and amount units exactly as Paystack documents them; pass amounts in provider subunits.
@@ -464,6 +475,7 @@ Paystack uses one API host for test and live mode: `https://api.paystack.co`. Th
 | API | Behavior |
 | --- | --- |
 | `PaystackClient::getAccessToken()` | Returns the configured secret key or custom token-provider value. |
+| `PaystackClient::authorizedPost()/authorizedGet()/authorizedPut()/authorizedDelete()` | Raw bearer-authenticated helpers for Paystack endpoints not yet represented by named methods. Payloads and query keys are preserved. |
 | `PaystackWebhookVerifier::expectedSignature()` | Computes the HMAC-SHA512 hex digest over the raw request body. |
 | `PaystackWebhookVerifier::verify()` | Validates raw body/signature/IP checks according to configured or per-call toggles. |
 | `PaystackWebhookVerifier::verifyRequest()` | Extracts the raw body, `x-paystack-signature`, and IP from a Laravel request. |
@@ -813,7 +825,8 @@ The SasaPay docs also contain status-code pages. Those pages document static val
 | `getAccessToken()` | `GET /oauth/v1/generate?grant_type=client_credentials` |
 | `stkPush()` | `POST /mpesa/stkpush/v1/processrequest` |
 | `stkPushQuery()` | `POST /mpesa/stkpushquery/v1/query` |
-| `registerC2BUrls()` | `POST /mpesa/c2b/{version}/registerurl` |
+| `registerC2BUrls()` | `POST /mpesa/c2b/v2/registerurl` by default for backward compatibility; pass `version: 'v1'` for the current documented C2B Register URL path. |
+| `registerC2BUrlsV1()` | `POST /mpesa/c2b/v1/registerurl` |
 | `c2bSimulate()` | `POST /mpesa/c2b/v1/simulate` |
 | `b2cPayment()` | `POST /mpesa/b2c/{version}/paymentrequest` |
 | `b2cPaymentV3()` | `POST /mpesa/b2c/v3/paymentrequest` |
@@ -832,7 +845,7 @@ The SasaPay docs also contain status-code pages. Those pages document static val
 | `ratibaStandingOrder()` | `POST /standingorder/v1/createStandingOrderExternal` |
 | `pullTransactions()` | `POST /pulltransactions/v1/query` |
 
-M-PESA methods intentionally preserve Daraja field names. The client only string-casts `Amount` or `amount` when present and, for the named B2B product helpers, adds the documented `CommandID` only when the caller has not supplied one.
+M-PESA methods intentionally preserve Daraja field names. The client only string-casts `Amount` or `amount` when present by default and, for the named B2B product helpers, adds the documented `CommandID` only when the caller has not supplied one. Set `amount_normalization` to `none` globally or per request when you need to preserve raw JSON number types.
 
 Endpoint overrides are available when a Daraja tenant is provisioned with a different path:
 
@@ -850,6 +863,8 @@ Helper methods:
 
 - `MpesaClient::buildTimestamp(?DateTimeInterface $dateTime = null): string`
 - `MpesaClient::buildStkPassword(string $businessShortCode, string $passkey, string $timestamp): string`
+- `MpesaClient::authorizedPost(string $path, array $payload = [], array|RequestOptions|null $options = null): mixed`
+- `MpesaClient::authorizedGet(string $path, array $query = [], array|RequestOptions|null $options = null): mixed`
 
 ## Request Options
 
@@ -868,7 +883,7 @@ Fields:
 | `retry` | Request-specific retry policy or `false` to disable retries. |
 | `access_token` | Explicit bearer token override. |
 | `force_token_refresh` | Forces the next token lookup to refresh. |
-| `amount_normalization` | SasaPay-only override. Use `none` to preserve raw numeric `Amount` and `amount` values for that request. |
+| `amount_normalization` | Per-request override for providers that normalize amount fields by default. Use `none` to preserve raw numeric `Amount` and `amount` values for SasaPay, M-PESA, and KCB Buni M-PESA Express calls. |
 
 Example:
 
@@ -990,9 +1005,19 @@ composer test:coverage
 
 Use `composer format` to apply Laravel Pint formatting.
 
+## M-PESA Documentation References
+
+The M-PESA Daraja endpoint matrix was aligned with Safaricom's public Daraja portal and official Safaricom SDK references:
+
+- https://developer.safaricom.co.ke/
+- https://developer.safaricom.co.ke/apis
+- https://developer.safaricom.co.ke/c2b/apis/post/registerurl
+- https://developer.safaricom.co.ke/lipa-na-m-pesa-online/apis/post/stkpush/v1/processrequest
+- https://github.com/safaricom/mpesa-node-library
+
 ## KCB Buni Documentation References
 
-The KCB Buni endpoint matrix was aligned with the public Buni DevPortal API metadata, OpenAPI documents, and M-PESA Express Postman/PDF artifacts available on May 1, 2026:
+The KCB Buni endpoint matrix was aligned with the public Buni DevPortal API metadata, OpenAPI documents, and M-PESA Express Postman/PDF artifacts available on May 3, 2026:
 
 - https://buni.kcbgroup.com/discover-apis
 - https://sandbox.buni.kcbgroup.com/api/am/devportal/v3/apis
