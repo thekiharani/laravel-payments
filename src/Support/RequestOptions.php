@@ -13,6 +13,7 @@ class RequestOptions
         public readonly RetryPolicy|false|null $retry = null,
         public readonly ?string $accessToken = null,
         public readonly bool $forceTokenRefresh = false,
+        public readonly ?string $amountNormalization = null,
     ) {}
 
     public static function fromArray(array|self|null $value): self
@@ -31,6 +32,7 @@ class RequestOptions
             retry: array_key_exists('retry', $value) ? (RetryPolicy::fromArray($value['retry']) ?? false) : null,
             accessToken: $value['access_token'] ?? null,
             forceTokenRefresh: (bool) ($value['force_token_refresh'] ?? false),
+            amountNormalization: $value['amount_normalization'] ?? $value['amountNormalization'] ?? null,
         );
     }
 }

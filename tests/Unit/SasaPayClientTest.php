@@ -55,6 +55,66 @@ it('requests token and sends c2b payment', function (): void {
     });
 });
 
+it('keeps amount stringification by default and can preserve raw numeric amounts', function (): void {
+    Http::fake([
+        'https://sandbox.sasapay.app/api/v1/payments/request-payment/' => Http::response(['status' => true], 200),
+        'https://sandbox.sasapay.app/api/v1/payments/lipa-fare/' => Http::response(['status' => true], 200),
+    ]);
+
+    $tokenProvider = new class implements AccessTokenProvider
+    {
+        public function getAccessToken(bool $forceRefresh = false): string
+        {
+            return 'token';
+        }
+    };
+
+    $defaultClient = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+    ], $tokenProvider);
+
+    $defaultClient->requestPayment(['Amount' => 100]);
+
+    $rawClient = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+        'amount_normalization' => 'none',
+    ], $tokenProvider);
+
+    $rawClient->requestPayment(['Amount' => 100]);
+    $rawClient->lipaFare(['amount' => 100.50]);
+
+    $requests = collect(Http::recorded())
+        ->filter(fn (array $record): bool => $record[0]->url() !== 'https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials')
+        ->values();
+
+    expect($requests[0][0]->data()['Amount'])->toBe('100')
+        ->and($requests[1][0]->data()['Amount'])->toBe(100)
+        ->and($requests[2][0]->data()['amount'])->toBe(100.50);
+});
+
+it('can disable amount normalization per request', function (): void {
+    Http::fake([
+        'https://sandbox.sasapay.app/api/v1/payments/request-payment/' => Http::response(['status' => true], 200),
+    ]);
+
+    $tokenProvider = new class implements AccessTokenProvider
+    {
+        public function getAccessToken(bool $forceRefresh = false): string
+        {
+            return 'token';
+        }
+    };
+
+    $client = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+    ], $tokenProvider);
+
+    $client->requestPayment(['Amount' => 100], new RequestOptions(amountNormalization: 'none'));
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://sandbox.sasapay.app/api/v1/payments/request-payment/'
+        && $request->data()['Amount'] === 100);
+});
+
 it('supports per request access token overrides', function (): void {
     Http::fake([
         'https://sandbox.sasapay.app/api/v1/payments/process-payment/' => Http::response([
@@ -177,7 +237,7 @@ it('maps documented non waas sasapay endpoints', function (): void {
         'https://sandbox.sasapay.app/api/v1/remittances/remittance-payments/',
         'https://sandbox.sasapay.app/api/v1/accounts/account-validation/',
         'https://sandbox.sasapay.app/api/v1/transactions/fund-movement/',
-        'https://sandbox.sasapay.app/api/v1/transactions/status-query/',
+        'https://sandbox.sasapay.app/api/v1/transactions/status/',
         'https://sandbox.sasapay.app/api/v1/payments/check-balance/?MerchantCode=600980',
         'https://sandbox.sasapay.app/api/v1/transactions/verify/',
         'https://sandbox.sasapay.app/api/v1/payments/b2c/beneficiary/',
@@ -207,6 +267,116 @@ it('maps documented non waas sasapay endpoints', function (): void {
         return $request->url() === 'https://sandbox.sasapay.app/api/v1/payments/card-payments/'
             && $request['Amount'] === '10';
     });
+});
+
+it('exposes exact sasapay status endpoint aliases', function (): void {
+    Http::fake([
+        'https://sandbox.sasapay.app/api/v1/*' => Http::response([
+            'status' => true,
+            'ResponseCode' => '0',
+        ], 200),
+    ]);
+
+    $tokenProvider = new class implements AccessTokenProvider
+    {
+        public function getAccessToken(bool $forceRefresh = false): string
+        {
+            return 'token';
+        }
+    };
+
+    $client = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+    ], $tokenProvider);
+
+    $client->transactionStatus(['MerchantCode' => '600980', 'MerchantTransactionReference' => 'merchant-reference']);
+    $client->transactionStatusQuery(['MerchantCode' => '600980', 'CheckoutRequestId' => 'checkout-query']);
+    $client->transactionStatusExact(['MerchantCode' => '600980', 'CheckoutRequestId' => 'checkout-exact']);
+    $client->requestPaymentStatus(['MerchantCode' => '600980', 'CheckoutRequestID' => 'checkout-payment']);
+
+    $requests = collect(Http::recorded())->map(fn (array $record): array => [
+        'url' => $record[0]->url(),
+        'data' => $record[0]->data(),
+    ]);
+
+    expect($requests->pluck('url')->all())->toContain(
+        'https://sandbox.sasapay.app/api/v1/transactions/status-query/',
+        'https://sandbox.sasapay.app/api/v1/transactions/status/',
+        'https://sandbox.sasapay.app/api/v1/payments/request-payment/status/',
+    );
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://sandbox.sasapay.app/api/v1/transactions/status/'
+        && $request->data() === ['MerchantCode' => '600980', 'MerchantTransactionReference' => 'merchant-reference']);
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://sandbox.sasapay.app/api/v1/payments/request-payment/status/'
+        && $request->data() === ['MerchantCode' => '600980', 'CheckoutRequestID' => 'checkout-payment']);
+});
+
+it('applies configured sasapay payment defaults without overwriting explicit values', function (): void {
+    Http::fake([
+        'https://sandbox.sasapay.app/api/v1/payments/b2c/' => Http::response(['status' => true], 200),
+        'https://sandbox.sasapay.app/api/v2/waas/payments/request-payment/' => Http::response(['status' => true], 200),
+        'https://sandbox.sasapay.app/api/v2/waas/business-onboarding/' => Http::response(['status' => true], 200),
+        'https://sandbox.sasapay.app/api/v2/waas/business-onboarding/confirmation/' => Http::response(['status' => true], 200),
+    ]);
+
+    $tokenProvider = new class implements AccessTokenProvider
+    {
+        public function getAccessToken(bool $forceRefresh = false): string
+        {
+            return 'token';
+        }
+    };
+
+    $client = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+        'payment_defaults' => [
+            'MerchantCode' => '600980',
+            'Currency' => 'KES',
+            'CallBackURL' => 'https://example.com/core-callback',
+        ],
+        'waas_payment_defaults' => [
+            'merchantCode' => '700980',
+            'currencyCode' => 'KES',
+            'callbackUrl' => 'https://example.com/waas-callback',
+        ],
+    ], $tokenProvider);
+
+    $client->b2cPayment([
+        'Amount' => 10,
+        'Currency' => 'USD',
+    ]);
+    $client->waasRequestPayment([
+        'amount' => 20,
+        'callbackUrl' => 'https://example.com/override',
+    ]);
+    $client->waasBusinessOnboarding([
+        'businessName' => 'Noria Labs',
+    ]);
+    $client->waasConfirmBusinessOnboarding([
+        'requestId' => 'REQ-123',
+        'otp' => '123456',
+    ]);
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://sandbox.sasapay.app/api/v1/payments/b2c/'
+        && $request->data()['MerchantCode'] === '600980'
+        && $request->data()['Currency'] === 'USD'
+        && $request->data()['CallBackURL'] === 'https://example.com/core-callback');
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://sandbox.sasapay.app/api/v2/waas/payments/request-payment/'
+        && $request->data()['merchantCode'] === '700980'
+        && $request->data()['currencyCode'] === 'KES'
+        && $request->data()['callbackUrl'] === 'https://example.com/override');
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://sandbox.sasapay.app/api/v2/waas/business-onboarding/'
+        && $request->data()['merchantCode'] === '700980'
+        && $request->data()['callbackUrl'] === 'https://example.com/waas-callback'
+        && ! array_key_exists('currencyCode', $request->data()));
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://sandbox.sasapay.app/api/v2/waas/business-onboarding/confirmation/'
+        && $request->data()['merchantCode'] === '700980'
+        && ! array_key_exists('currencyCode', $request->data())
+        && ! array_key_exists('callbackUrl', $request->data()));
 });
 
 it('authenticates against the documented waas token endpoint', function (): void {
@@ -341,6 +511,126 @@ it('maps documented waas endpoints', function (): void {
         'https://sandbox.sasapay.app/api/v2/waas/utilities/',
         'https://sandbox.sasapay.app/api/v1/utilities/bill-query',
     );
+});
+
+it('sends waas kyc uploads as multipart when files are provided', function (): void {
+    Http::fake([
+        'https://sandbox.sasapay.app/api/v2/waas/business-onboarding/kyc/' => Http::response(['status' => true], 200),
+        'https://sandbox.sasapay.app/api/v2/waas/personal-onboarding/kyc/' => Http::response(['status' => true], 200),
+    ]);
+
+    $tokenProvider = new class implements AccessTokenProvider
+    {
+        public function getAccessToken(bool $forceRefresh = false): string
+        {
+            return 'token';
+        }
+    };
+
+    $client = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+        'waas_payment_defaults' => [
+            'merchantCode' => '600980',
+            'currencyCode' => 'KES',
+            'callbackUrl' => 'https://example.com/ignored-for-kyc',
+        ],
+    ], $tokenProvider);
+
+    $client->waasBusinessKyc(
+        ['requestId' => 'REQ-123'],
+        ['businessKraPin' => ['name' => 'kra.jpg', 'contents' => 'kra contents']],
+    );
+    $client->waasPersonalKyc(
+        ['customerMobileNumber' => '254700000000'],
+        ['passportSizePhoto' => ['name' => 'passport.jpg', 'contents' => 'passport contents']],
+    );
+
+    Http::assertSent(function ($request): bool {
+        $contentType = $request->header('Content-Type')[0] ?? '';
+        $body = $request->body();
+
+        return $request->url() === 'https://sandbox.sasapay.app/api/v2/waas/business-onboarding/kyc/'
+            && $request->hasHeader('Authorization', 'Bearer token')
+            && str_contains($contentType, 'multipart/form-data')
+            && str_contains($body, 'merchantCode')
+            && str_contains($body, '600980')
+            && str_contains($body, 'requestId')
+            && str_contains($body, 'REQ-123')
+            && str_contains($body, 'businessKraPin')
+            && str_contains($body, 'kra contents')
+            && ! str_contains($body, 'callbackUrl')
+            && ! str_contains($body, 'currencyCode');
+    });
+
+    Http::assertSent(function ($request): bool {
+        $body = $request->body();
+
+        return $request->url() === 'https://sandbox.sasapay.app/api/v2/waas/personal-onboarding/kyc/'
+            && str_contains($body, 'passportSizePhoto')
+            && str_contains($body, 'passport contents');
+    });
+});
+
+it('keeps waas kyc json behavior without files and accepts old options argument shape', function (): void {
+    Http::fake([
+        'https://sandbox.sasapay.app/api/v2/waas/personal-onboarding/kyc/' => Http::response(['status' => true], 200),
+    ]);
+
+    $tokenProvider = new class implements AccessTokenProvider
+    {
+        public function getAccessToken(bool $forceRefresh = false): string
+        {
+            return 'provider-token';
+        }
+    };
+
+    $client = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+    ], $tokenProvider);
+
+    $client->waasPersonalKyc(
+        ['merchantCode' => '600980'],
+        new RequestOptions(headers: ['X-Request-Id' => 'kyc-json'], accessToken: 'manual-token'),
+    );
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://sandbox.sasapay.app/api/v2/waas/personal-onboarding/kyc/'
+        && $request->hasHeader('Authorization', 'Bearer manual-token')
+        && $request->hasHeader('X-Request-Id', 'kyc-json')
+        && $request->data() === ['merchantCode' => '600980']);
+});
+
+it('exposes raw authorized helpers for core and waas APIs', function (): void {
+    Http::fake([
+        'https://sandbox.sasapay.app/api/v1/custom/raw' => Http::response(['status' => true], 200),
+        'https://sandbox.sasapay.app/api/v1/custom/raw-get?Amount=100' => Http::response(['status' => true], 200),
+        'https://sandbox.sasapay.app/api/v2/waas/custom/raw' => Http::response(['status' => true], 200),
+        'https://sandbox.sasapay.app/api/v2/waas/custom/raw-get?amount=100.5' => Http::response(['status' => true], 200),
+    ]);
+
+    $tokenProvider = new class implements AccessTokenProvider
+    {
+        public function getAccessToken(bool $forceRefresh = false): string
+        {
+            return $forceRefresh ? 'fresh-token' : 'token';
+        }
+    };
+
+    $client = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+    ], $tokenProvider);
+
+    $client->authorizedPost('/custom/raw', ['Amount' => 100]);
+    $client->authorizedGet('/custom/raw-get', ['Amount' => 100]);
+    $client->waasAuthorizedPost('/custom/raw', ['amount' => 100.5], ['force_token_refresh' => true]);
+    $client->waasAuthorizedGet('/custom/raw-get', ['amount' => 100.5]);
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://sandbox.sasapay.app/api/v1/custom/raw'
+        && $request->hasHeader('Authorization', 'Bearer token')
+        && $request->data()['Amount'] === 100);
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://sandbox.sasapay.app/api/v2/waas/custom/raw'
+        && $request->hasHeader('Authorization', 'Bearer fresh-token')
+        && $request->data()['amount'] === 100.5);
 });
 
 it('honors per-provider endpoint overrides for both v1 and waas', function (): void {

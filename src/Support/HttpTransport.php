@@ -5,9 +5,12 @@ namespace NoriaLabs\Payments\Support;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Response;
+use Illuminate\Http\File;
+use Illuminate\Http\UploadedFile;
 use NoriaLabs\Payments\Exceptions\ApiException;
 use NoriaLabs\Payments\Exceptions\NetworkException;
 use NoriaLabs\Payments\Exceptions\TimeoutException;
+use SplFileInfo;
 
 class HttpTransport
 {
@@ -26,6 +29,7 @@ class HttpTransport
     /**
      * @param  array<string, string>  $headers
      * @param  array<string, scalar|null>|null  $query
+     * @param  array<mixed>|null  $multipart
      */
     public function send(
         string $path,
@@ -35,6 +39,7 @@ class HttpTransport
         mixed $body = null,
         ?float $timeoutSeconds = null,
         RetryPolicy|false|null $retry = null,
+        ?array $multipart = null,
     ): mixed {
         $url = $this->appendPath($path);
         $resolvedRetry = $this->resolveRetryPolicy($retry);
@@ -43,12 +48,18 @@ class HttpTransport
 
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
             $mergedHeaders = array_merge($this->defaultHeaders, $headers);
+
+            if ($multipart !== null && ! $this->hasHeader($headers, 'Content-Type')) {
+                $mergedHeaders = $this->withoutHeader($mergedHeaders, 'Content-Type');
+            }
+
+            $requestBody = $multipart ?? $body;
             $context = new BeforeRequestContext(
                 url: $url,
                 path: $path,
                 method: strtoupper($method),
                 headers: $mergedHeaders,
-                body: $body,
+                body: $requestBody,
                 attempt: $attempt,
             );
 
@@ -62,7 +73,8 @@ class HttpTransport
                     url: $url,
                     headers: $context->headers,
                     query: $query,
-                    body: $context->body,
+                    body: $multipart === null ? $context->body : null,
+                    multipart: $multipart === null ? null : $context->body,
                     timeoutSeconds: $resolvedTimeout,
                 );
             } catch (ConnectionException $exception) {
@@ -140,8 +152,36 @@ class HttpTransport
     }
 
     /**
+     * @param  array<string, mixed>  $fields
+     * @param  array<string|int, mixed>  $files
      * @param  array<string, string>  $headers
      * @param  array<string, scalar|null>|null  $query
+     */
+    public function sendMultipart(
+        string $path,
+        string $method = 'POST',
+        array $fields = [],
+        array $files = [],
+        array $headers = [],
+        ?array $query = null,
+        ?float $timeoutSeconds = null,
+        RetryPolicy|false|null $retry = null,
+    ): mixed {
+        return $this->send(
+            path: $path,
+            method: $method,
+            headers: $headers,
+            query: $query,
+            timeoutSeconds: $timeoutSeconds,
+            retry: $retry,
+            multipart: $this->multipartParts($fields, $files),
+        );
+    }
+
+    /**
+     * @param  array<string, string>  $headers
+     * @param  array<string, scalar|null>|null  $query
+     * @param  array<mixed>|null  $multipart
      */
     private function performRequest(
         string $method,
@@ -149,6 +189,7 @@ class HttpTransport
         array $headers,
         ?array $query,
         mixed $body,
+        ?array $multipart,
         ?float $timeoutSeconds,
     ): Response {
         $request = $this->http->withHeaders($headers);
@@ -160,6 +201,12 @@ class HttpTransport
         $query = array_filter($query ?? [], static fn ($value) => $value !== null);
 
         if ($body === null) {
+            if ($multipart !== null) {
+                return $request
+                    ->asMultipart()
+                    ->send($method, $url, ['query' => $query, 'multipart' => $this->normalizeMultipart($multipart)]);
+            }
+
             return $request->send($method, $url, ['query' => $query]);
         }
 
@@ -176,6 +223,193 @@ class HttpTransport
         }
 
         return $request->send($method, $url, ['query' => $query, 'json' => $body]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $fields
+     * @param  array<string|int, mixed>  $files
+     * @return array<int, array<string, mixed>>
+     */
+    private function multipartParts(array $fields, array $files): array
+    {
+        $parts = [];
+
+        foreach ($fields as $name => $value) {
+            $this->appendMultipartValue($parts, (string) $name, $value, false);
+        }
+
+        foreach ($files as $name => $file) {
+            if (is_int($name) && is_array($file) && (isset($file['name']) || isset($file['contents']) || isset($file['path']))) {
+                $parts[] = $this->normalizeMultipartPart($file);
+
+                continue;
+            }
+
+            $parts[] = $this->normalizeFilePart((string) $name, $file);
+        }
+
+        return $parts;
+    }
+
+    /**
+     * @param  array<mixed>  $multipart
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeMultipart(array $multipart): array
+    {
+        if (array_is_list($multipart)) {
+            return array_map(fn (mixed $part): array => $this->normalizeMultipartPart($part), $multipart);
+        }
+
+        $parts = [];
+
+        foreach ($multipart as $name => $value) {
+            $this->appendMultipartValue($parts, (string) $name, $value, true);
+        }
+
+        return $parts;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $parts
+     */
+    private function appendMultipartValue(array &$parts, string $name, mixed $value, bool $treatFilePathsAsFiles): void
+    {
+        if ($this->isFileInput($value, $treatFilePathsAsFiles)) {
+            $parts[] = $this->normalizeFilePart($name, $value);
+
+            return;
+        }
+
+        if (is_array($value)) {
+            foreach ($value as $key => $item) {
+                $nestedName = is_int($key) ? "{$name}[]" : "{$name}[{$key}]";
+                $this->appendMultipartValue($parts, $nestedName, $item, $treatFilePathsAsFiles);
+            }
+
+            return;
+        }
+
+        $parts[] = [
+            'name' => $name,
+            'contents' => $value ?? '',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeMultipartPart(mixed $part): array
+    {
+        if (! is_array($part)) {
+            return [
+                'name' => 'file',
+                'contents' => $this->rewindIfResource($part),
+            ];
+        }
+
+        $name = (string) ($part['name'] ?? 'file');
+
+        if (isset($part['path']) && is_string($part['path']) && $part['path'] !== '') {
+            $filePart = $this->normalizePathFilePart($name, $part['path'], $part['filename'] ?? null);
+            $filePart['headers'] = $part['headers'] ?? [];
+
+            return $filePart;
+        }
+
+        return array_filter([
+            'name' => $name,
+            'contents' => $this->rewindIfResource($part['contents'] ?? ''),
+            'filename' => $part['filename'] ?? null,
+            'headers' => $part['headers'] ?? null,
+        ], static fn (mixed $value): bool => $value !== null);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeFilePart(string $name, mixed $file): array
+    {
+        if ($file instanceof UploadedFile) {
+            return $this->normalizePathFilePart($name, $file->getRealPath() ?: $file->getPathname(), $file->getClientOriginalName());
+        }
+
+        if ($file instanceof File || $file instanceof SplFileInfo) {
+            return $this->normalizePathFilePart($name, $file->getRealPath() ?: $file->getPathname(), $file->getFilename());
+        }
+
+        if (is_string($file) && is_file($file)) {
+            return $this->normalizePathFilePart($name, $file, basename($file));
+        }
+
+        if (is_array($file)) {
+            $headers = $file['headers'] ?? [];
+            $filename = $file['filename'] ?? $file['name'] ?? null;
+
+            if (isset($file['path']) && is_string($file['path']) && $file['path'] !== '') {
+                $part = $this->normalizePathFilePart($name, $file['path'], is_string($filename) && $filename !== '' ? $filename : null);
+                $part['headers'] = $headers;
+
+                return $part;
+            }
+
+            return array_filter([
+                'name' => $name,
+                'contents' => $this->rewindIfResource($file['contents'] ?? ''),
+                'filename' => is_string($filename) && $filename !== '' ? $filename : null,
+                'headers' => $headers,
+            ], static fn (mixed $value): bool => $value !== null);
+        }
+
+        return [
+            'name' => $name,
+            'contents' => $this->rewindIfResource($file),
+            'filename' => $name,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizePathFilePart(string $name, string $path, mixed $filename = null): array
+    {
+        $contents = fopen($path, 'r');
+
+        if ($contents === false) {
+            throw new NetworkException("Unable to open multipart file [{$path}].");
+        }
+
+        return [
+            'name' => $name,
+            'contents' => $contents,
+            'filename' => is_string($filename) && $filename !== '' ? $filename : basename($path),
+        ];
+    }
+
+    private function isFileInput(mixed $value, bool $treatFilePathsAsFiles): bool
+    {
+        if ($value instanceof UploadedFile || $value instanceof File || $value instanceof SplFileInfo) {
+            return true;
+        }
+
+        if ($treatFilePathsAsFiles && is_string($value) && is_file($value)) {
+            return true;
+        }
+
+        return is_array($value) && (array_key_exists('contents', $value) || array_key_exists('path', $value));
+    }
+
+    private function rewindIfResource(mixed $contents): mixed
+    {
+        if (is_resource($contents)) {
+            $meta = stream_get_meta_data($contents);
+
+            if ($meta['seekable'] === true) {
+                rewind($contents);
+            }
+        }
+
+        return $contents;
     }
 
     private function appendPath(string $path): string
@@ -351,5 +585,20 @@ class HttpTransport
         }
 
         return false;
+    }
+
+    /**
+     * @param  array<string, string>  $headers
+     * @return array<string, string>
+     */
+    private function withoutHeader(array $headers, string $name): array
+    {
+        foreach (array_keys($headers) as $key) {
+            if (strcasecmp((string) $key, $name) === 0) {
+                unset($headers[$key]);
+            }
+        }
+
+        return $headers;
     }
 }

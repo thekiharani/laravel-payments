@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Http\File;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use NoriaLabs\Payments\Exceptions\ApiException;
 use NoriaLabs\Payments\Exceptions\NetworkException;
@@ -83,6 +85,114 @@ it('throws ApiException with extracted body and dispatches error hooks on 4xx/5x
         ->toThrow(ApiException::class, 'server down')
         ->and($errorContext)->toBeInstanceOf(ErrorContext::class)
         ->and($errorContext?->responseBody)->toBe('server down');
+});
+
+it('sends multipart fields and files while preserving hooks retries and headers', function (): void {
+    $afterContexts = [];
+    $errorContexts = [];
+    $filePath = tempnam(sys_get_temp_dir(), 'payments-multipart-');
+    file_put_contents($filePath, 'document contents');
+
+    Http::fakeSequence('https://api.example.test/multipart')
+        ->push(['message' => 'temporary'], 500)
+        ->push(['ok' => true], 200);
+
+    $transport = new HttpTransport(
+        http: Http::getFacadeRoot(),
+        baseUrl: 'https://api.example.test',
+        defaultHeaders: [
+            'X-Default' => 'default',
+            'Content-Type' => 'application/json',
+        ],
+        hooks: new Hooks(
+            beforeRequest: function (BeforeRequestContext $context): void {
+                $context->headers['X-Before'] = 'before';
+            },
+            afterResponse: function (AfterResponseContext $context) use (&$afterContexts): void {
+                $afterContexts[] = $context;
+            },
+            onError: function (ErrorContext $context) use (&$errorContexts): void {
+                $errorContexts[] = $context;
+            },
+        ),
+    );
+
+    $response = $transport->sendMultipart(
+        path: '/multipart',
+        fields: ['merchantCode' => '123456'],
+        files: ['document' => $filePath],
+        retry: new RetryPolicy(
+            maxAttempts: 2,
+            retryMethods: ['POST'],
+            retryOnStatuses: [500],
+        ),
+    );
+
+    expect($response)->toBe(['ok' => true])
+        ->and($afterContexts)->toHaveCount(2)
+        ->and($errorContexts)->toHaveCount(1)
+        ->and($afterContexts[0]->body)->toBeArray()
+        ->and($errorContexts[0]->body)->toBeArray();
+
+    Http::assertSent(function ($request): bool {
+        $contentType = $request->header('Content-Type')[0] ?? '';
+
+        return $request->url() === 'https://api.example.test/multipart'
+            && $request->hasHeader('X-Default', 'default')
+            && $request->hasHeader('X-Before', 'before')
+            && str_contains($contentType, 'multipart/form-data')
+            && ! str_contains($contentType, 'application/json')
+            && str_contains($request->body(), 'merchantCode')
+            && str_contains($request->body(), '123456')
+            && str_contains($request->body(), 'document contents');
+    });
+
+    unlink($filePath);
+});
+
+it('supports documented multipart file input variants', function (): void {
+    $uploadedPath = tempnam(sys_get_temp_dir(), 'payments-uploaded-');
+    $filePath = tempnam(sys_get_temp_dir(), 'payments-file-');
+    $splPath = tempnam(sys_get_temp_dir(), 'payments-spl-');
+    $stringPath = tempnam(sys_get_temp_dir(), 'payments-string-');
+    $arrayPath = tempnam(sys_get_temp_dir(), 'payments-array-');
+
+    file_put_contents($uploadedPath, 'uploaded file');
+    file_put_contents($filePath, 'http file');
+    file_put_contents($splPath, 'spl file');
+    file_put_contents($stringPath, 'string path file');
+    file_put_contents($arrayPath, 'array path file');
+
+    Http::fake([
+        'https://api.example.test/files' => Http::response(['ok' => true], 200),
+    ]);
+
+    $transport = new HttpTransport(Http::getFacadeRoot(), 'https://api.example.test');
+
+    $transport->sendMultipart('/files', files: [
+        'uploaded' => new UploadedFile($uploadedPath, 'uploaded.txt', 'text/plain', null, true),
+        'file' => new File($filePath),
+        'spl' => new SplFileInfo($splPath),
+        'path' => $stringPath,
+        'array_contents' => ['name' => 'inline.txt', 'contents' => 'inline file'],
+        'array_path' => ['name' => 'array-path.txt', 'path' => $arrayPath],
+    ]);
+
+    Http::assertSent(function ($request): bool {
+        $body = $request->body();
+
+        return str_contains($body, 'uploaded.txt')
+            && str_contains($body, 'uploaded file')
+            && str_contains($body, 'http file')
+            && str_contains($body, 'spl file')
+            && str_contains($body, 'string path file')
+            && str_contains($body, 'inline file')
+            && str_contains($body, 'array path file');
+    });
+
+    foreach ([$uploadedPath, $filePath, $splPath, $stringPath, $arrayPath] as $path) {
+        unlink($path);
+    }
 });
 
 it('skips retries when the request method does not match retry_methods', function (): void {

@@ -8,6 +8,7 @@ use NoriaLabs\Payments\Exceptions\TimeoutException;
 use NoriaLabs\Payments\Support\AfterResponseContext;
 use NoriaLabs\Payments\Support\ErrorContext;
 use NoriaLabs\Payments\Support\Hooks;
+use NoriaLabs\Payments\Support\RequestOptions;
 use NoriaLabs\Payments\Support\RetryPolicy;
 
 it('builds AfterResponseContext and ErrorContext with expected fields', function (): void {
@@ -59,6 +60,18 @@ it('normalizes single callables and arrays of callables in Hooks', function (): 
 it('returns null from RetryPolicy::fromArray for null and false', function (): void {
     expect(RetryPolicy::fromArray(null))->toBeNull()
         ->and(RetryPolicy::fromArray(false))->toBeNull();
+});
+
+it('builds RequestOptions from arrays including amount normalization', function (): void {
+    $options = RequestOptions::fromArray([
+        'access_token' => 'token',
+        'force_token_refresh' => true,
+        'amount_normalization' => 'none',
+    ]);
+
+    expect($options->accessToken)->toBe('token')
+        ->and($options->forceTokenRefresh)->toBeTrue()
+        ->and($options->amountNormalization)->toBe('none');
 });
 
 it('returns the same RetryPolicy instance when fromArray receives one', function (): void {

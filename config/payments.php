@@ -44,6 +44,17 @@ return [
         'waas_token_cache_skew_seconds' => env('SASAPAY_WAAS_TOKEN_CACHE_SKEW_SECONDS', 60),
         'cache_store' => env('SASAPAY_CACHE_STORE'),
         'cache_ttl_seconds' => env('SASAPAY_CACHE_TTL_SECONDS'),
+        'amount_normalization' => env('SASAPAY_AMOUNT_NORMALIZATION', 'string'),
+        'payment_defaults' => [
+            'MerchantCode' => env('SASAPAY_MERCHANT_CODE'),
+            'Currency' => env('SASAPAY_CURRENCY'),
+            'CallBackURL' => env('SASAPAY_CALLBACK_URL'),
+        ],
+        'waas_payment_defaults' => [
+            'merchantCode' => env('SASAPAY_WAAS_MERCHANT_CODE'),
+            'currencyCode' => env('SASAPAY_WAAS_CURRENCY_CODE'),
+            'callbackUrl' => env('SASAPAY_WAAS_CALLBACK_URL'),
+        ],
         'endpoints' => [],
         'waas_endpoints' => [],
         'callback_security' => [

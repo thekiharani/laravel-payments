@@ -106,6 +106,9 @@ Top-level sections:
 | `waas_token_cache_skew_seconds` | WAAS token cache skew. |
 | `cache_store` | Optional SasaPay-specific token cache store override. |
 | `cache_ttl_seconds` | Optional SasaPay-specific token cache TTL override. |
+| `amount_normalization` | SasaPay amount handling. Defaults to `string`; set to `none` to preserve raw numeric `Amount`/`amount` values. |
+| `payment_defaults` | Optional v1 defaults for `MerchantCode`, `Currency`, and `CallBackURL`. Defaults are added only when the payload omits the key. |
+| `waas_payment_defaults` | Optional WAAS defaults for `merchantCode`, `currencyCode`, and `callbackUrl`. Defaults are added only when the payload omits the key. |
 | `endpoints` | Optional SasaPay v1 endpoint-path overrides keyed by `SasaPayClient::ENDPOINTS`. |
 | `waas_endpoints` | Optional SasaPay WAAS endpoint-path overrides keyed by `SasaPayClient::WAAS_ENDPOINTS`. |
 | `callback_security.secret_key` | HMAC secret for inbound callbacks. Defaults to the SasaPay client ID, as documented by SasaPay. |
@@ -669,6 +672,8 @@ The SasaPay client intentionally keeps provider field names as documented. It ac
 
 Methods return parsed JSON or text responses. HTTP 4xx/5xx responses throw `ApiException`. A SasaPay business failure returned with HTTP 200 is returned to you as the provider sent it, because SasaPay uses fields such as `status`, `responseCode`, `ResponseCode`, and `statusCode` differently across endpoints.
 
+SasaPay amount fields are string-cast by default for backward compatibility. Pass `new RequestOptions(amountNormalization: 'none')` or set `sasapay.amount_normalization` to `none` when an endpoint requires numeric JSON values.
+
 ### SasaPay Callback Security
 
 | API | Behavior |
@@ -712,7 +717,10 @@ Methods return parsed JSON or text responses. HTTP 4xx/5xx responses throw `ApiE
 | --- | --- |
 | `accountValidation()` | `POST /accounts/account-validation/` |
 | `internalFundMovement()` | `POST /transactions/fund-movement/` |
-| `transactionStatus()` | `POST /transactions/status-query/` |
+| `transactionStatus()` | `POST /transactions/status/` |
+| `transactionStatusQuery()` | `POST /transactions/status-query/` |
+| `transactionStatusExact()` | `POST /transactions/status/` |
+| `requestPaymentStatus()` | `POST /payments/request-payment/status/` |
 | `merchantBalance($merchantCode)` | `GET /payments/check-balance/?MerchantCode=...` |
 | `verifyTransaction()` | `POST /transactions/verify/` |
 | `transactions()` | `GET /transactions/` |
@@ -743,10 +751,10 @@ Methods return parsed JSON or text responses. HTTP 4xx/5xx responses throw `ApiE
 | --- | --- |
 | `waasPersonalOnboarding()` | `POST /personal-onboarding/` |
 | `waasConfirmPersonalOnboarding()` | `POST /personal-onboarding/confirmation/` |
-| `waasPersonalKyc()` | `POST /personal-onboarding/kyc/` |
+| `waasPersonalKyc()` | `POST /personal-onboarding/kyc/`; sends multipart when files are provided. |
 | `waasBusinessOnboarding()` | `POST /business-onboarding/` |
 | `waasConfirmBusinessOnboarding()` | `POST /business-onboarding/confirmation/` |
-| `waasBusinessKyc()` | `POST /business-onboarding/kyc/` |
+| `waasBusinessKyc()` | `POST /business-onboarding/kyc/`; sends multipart when files are provided. |
 | `waasCustomers()` | `GET /customers/` |
 | `waasCustomerDetails()` | `POST /customer-details/` |
 | `waasUpdateCustomerDetails()` | `POST /customer-details/update/` |
@@ -782,6 +790,19 @@ Methods return parsed JSON or text responses. HTTP 4xx/5xx responses throw `ApiE
 | `waasNearestAgents($longitude, $latitude)` | `GET /nearest-agent/?Longitude=...&Latitude=...` |
 | `waasUtilityPayment()` | `POST /utilities/` |
 | `waasUtilityBillQuery()` | Alias of v1 `utilityBillQuery()` because the current WAAS utilities docs point bill query to `/api/v1/utilities/bill-query`. |
+
+### SasaPay Raw Authorized Helpers
+
+Use these when SasaPay exposes an endpoint before this package has a named high-level method. They use the same token providers, retries, timeout handling, hooks, and exception mapping as the named APIs and do not normalize or rewrite payloads.
+
+| Method | Behavior |
+| --- | --- |
+| `authorizedPost($path, $payload = [])` | POST on the v1 base URL with bearer auth. |
+| `authorizedGet($path, $query = [])` | GET on the v1 base URL with bearer auth. |
+| `authorizedMultipartPost($path, $fields = [], $files = [])` | Multipart POST on the v1 base URL with bearer auth. |
+| `waasAuthorizedPost($path, $payload = [])` | POST on the WAAS base URL with bearer auth. |
+| `waasAuthorizedGet($path, $query = [])` | GET on the WAAS base URL with bearer auth. |
+| `waasAuthorizedMultipartPost($path, $fields = [], $files = [])` | Multipart POST on the WAAS base URL with bearer auth. |
 
 The SasaPay docs also contain status-code pages. Those pages document static values, not API endpoints, so they are not represented as HTTP methods.
 
@@ -847,6 +868,7 @@ Fields:
 | `retry` | Request-specific retry policy or `false` to disable retries. |
 | `access_token` | Explicit bearer token override. |
 | `force_token_refresh` | Forces the next token lookup to refresh. |
+| `amount_normalization` | SasaPay-only override. Use `none` to preserve raw numeric `Amount` and `amount` values for that request. |
 
 Example:
 
