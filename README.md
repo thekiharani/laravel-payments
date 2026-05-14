@@ -842,6 +842,13 @@ The SasaPay docs also contain status-code pages. Those pages document static val
 | `taxRemittance()` | `POST /mpesa/b2b/v1/remittax` |
 | `billManagerOptIn()` | `POST /v1/billmanager-invoice/optin` |
 | `billManagerSingleInvoice()` | `POST /v1/billmanager-invoice/single-invoicing` |
+| `billManagerBulkInvoicing()` | `POST /v1/billmanager-invoice/bulk-invoicing` |
+| `billManagerReconciliation()` | `POST /v1/billmanager-invoice/reconciliation` |
+| `billManagerCancelSingleInvoice()` | `POST /v1/billmanager-invoice/cancel-single-invoice` |
+| `billManagerCancelBulkInvoice()` | `POST /v1/billmanager-invoice/cancel-bulk-invoice` |
+| `billManagerUpdateOnboardingDetails()` | `POST /v1/billmanager-invoice/change-optin-details` |
+| `billManagerUpdateSingleInvoice()` | `POST /v1/billmanager-invoice/change-invoice` |
+| `billManagerUpdateBulkInvoice()` | `POST /v1/billmanager-invoice/change-invoices` |
 | `ratibaStandingOrder()` | `POST /standingorder/v1/createStandingOrderExternal` |
 | `pullTransactions()` | `POST /pulltransactions/v1/query` |
 

@@ -35,6 +35,13 @@ class MpesaClient
         'tax_remittance' => '/mpesa/b2b/v1/remittax',
         'bill_manager_opt_in' => '/v1/billmanager-invoice/optin',
         'bill_manager_single_invoice' => '/v1/billmanager-invoice/single-invoicing',
+        'bill_manager_bulk_invoicing' => '/v1/billmanager-invoice/bulk-invoicing',
+        'bill_manager_reconciliation' => '/v1/billmanager-invoice/reconciliation',
+        'bill_manager_cancel_single_invoice' => '/v1/billmanager-invoice/cancel-single-invoice',
+        'bill_manager_cancel_bulk_invoice' => '/v1/billmanager-invoice/cancel-bulk-invoice',
+        'bill_manager_update_onboarding_details' => '/v1/billmanager-invoice/change-optin-details',
+        'bill_manager_update_single_invoice' => '/v1/billmanager-invoice/change-invoice',
+        'bill_manager_update_bulk_invoice' => '/v1/billmanager-invoice/change-invoices',
         'ratiba_standing_order' => '/standingorder/v1/createStandingOrderExternal',
         'pull_transactions' => '/pulltransactions/v1/query',
     ];
@@ -214,6 +221,41 @@ class MpesaClient
     public function billManagerSingleInvoice(array $payload, array|RequestOptions|null $options = null): mixed
     {
         return $this->authorizedRequest($this->endpoint('bill_manager_single_invoice'), $this->withAmount($payload, $options), $options);
+    }
+
+    public function billManagerBulkInvoicing(array $payload, array|RequestOptions|null $options = null): mixed
+    {
+        return $this->authorizedRequest($this->endpoint('bill_manager_bulk_invoicing'), $payload, $options);
+    }
+
+    public function billManagerReconciliation(array $payload, array|RequestOptions|null $options = null): mixed
+    {
+        return $this->authorizedRequest($this->endpoint('bill_manager_reconciliation'), $payload, $options);
+    }
+
+    public function billManagerCancelSingleInvoice(array $payload, array|RequestOptions|null $options = null): mixed
+    {
+        return $this->authorizedRequest($this->endpoint('bill_manager_cancel_single_invoice'), $payload, $options);
+    }
+
+    public function billManagerCancelBulkInvoice(array $payload, array|RequestOptions|null $options = null): mixed
+    {
+        return $this->authorizedRequest($this->endpoint('bill_manager_cancel_bulk_invoice'), $payload, $options);
+    }
+
+    public function billManagerUpdateOnboardingDetails(array $payload, array|RequestOptions|null $options = null): mixed
+    {
+        return $this->authorizedRequest($this->endpoint('bill_manager_update_onboarding_details'), $payload, $options);
+    }
+
+    public function billManagerUpdateSingleInvoice(array $payload, array|RequestOptions|null $options = null): mixed
+    {
+        return $this->authorizedRequest($this->endpoint('bill_manager_update_single_invoice'), $this->withAmount($payload, $options), $options);
+    }
+
+    public function billManagerUpdateBulkInvoice(array $payload, array|RequestOptions|null $options = null): mixed
+    {
+        return $this->authorizedRequest($this->endpoint('bill_manager_update_bulk_invoice'), $payload, $options);
     }
 
     public function ratibaStandingOrder(array $payload, array|RequestOptions|null $options = null): mixed

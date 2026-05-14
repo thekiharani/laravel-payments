@@ -168,7 +168,14 @@ it('maps every supported daraja product endpoint without reshaping payloads', fu
     $client->taxRemittance(['Amount' => 15]);
     $client->billManagerOptIn(['shortcode' => '600000']);
     $client->billManagerSingleInvoice(['amount' => 16]);
-    $client->ratibaStandingOrder(['Amount' => 17]);
+    $client->billManagerBulkInvoicing(['invoices' => [['amount' => 17]]]);
+    $client->billManagerReconciliation(['transactionId' => 'recon-1']);
+    $client->billManagerCancelSingleInvoice(['externalReference' => 'INV-001']);
+    $client->billManagerCancelBulkInvoice(['externalReferences' => ['INV-001', 'INV-002']]);
+    $client->billManagerUpdateOnboardingDetails(['shortcode' => '600000', 'email' => 'ops@example.com']);
+    $client->billManagerUpdateSingleInvoice(['externalReference' => 'INV-001', 'amount' => 18]);
+    $client->billManagerUpdateBulkInvoice(['invoices' => [['externalReference' => 'INV-001', 'amount' => 19]]]);
+    $client->ratibaStandingOrder(['Amount' => 20]);
     $client->pullTransactions(['ShortCode' => '600000']);
 
     $urls = collect(Http::recorded())->map(fn (array $record): string => $record[0]->url())->all();
@@ -190,6 +197,13 @@ it('maps every supported daraja product endpoint without reshaping payloads', fu
         'https://custom.safaricom.test/mpesa/b2b/v1/remittax',
         'https://custom.safaricom.test/v1/billmanager-invoice/optin',
         'https://custom.safaricom.test/v1/billmanager-invoice/single-invoicing',
+        'https://custom.safaricom.test/v1/billmanager-invoice/bulk-invoicing',
+        'https://custom.safaricom.test/v1/billmanager-invoice/reconciliation',
+        'https://custom.safaricom.test/v1/billmanager-invoice/cancel-single-invoice',
+        'https://custom.safaricom.test/v1/billmanager-invoice/cancel-bulk-invoice',
+        'https://custom.safaricom.test/v1/billmanager-invoice/change-optin-details',
+        'https://custom.safaricom.test/v1/billmanager-invoice/change-invoice',
+        'https://custom.safaricom.test/v1/billmanager-invoice/change-invoices',
         'https://custom.safaricom.test/standingorder/v1/createStandingOrderExternal',
         'https://custom.safaricom.test/pulltransactions/v1/query',
     );
@@ -201,6 +215,13 @@ it('maps every supported daraja product endpoint without reshaping payloads', fu
     Http::assertSent(fn ($request): bool => ($request->data()['CommandID'] ?? null) === 'BusinessBuyGoods');
     Http::assertSent(fn ($request): bool => ($request->data()['CommandID'] ?? null) === 'CustomCommand'
         && ($request->data()['Amount'] ?? null) === '11');
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://custom.safaricom.test/v1/billmanager-invoice/change-invoice'
+        && ($request->data()['amount'] ?? null) === '18');
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://custom.safaricom.test/v1/billmanager-invoice/bulk-invoicing'
+        && is_array($request->data()['invoices'] ?? null)
+        && ($request->data()['invoices'][0]['amount'] ?? null) === 17);
 });
 
 it('can preserve raw mpesa amount values when normalization is disabled', function (): void {
