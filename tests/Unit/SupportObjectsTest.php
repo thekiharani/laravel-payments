@@ -8,6 +8,7 @@ use NoriaLabs\Payments\Exceptions\TimeoutException;
 use NoriaLabs\Payments\Support\AfterResponseContext;
 use NoriaLabs\Payments\Support\ErrorContext;
 use NoriaLabs\Payments\Support\Hooks;
+use NoriaLabs\Payments\Support\Payload;
 use NoriaLabs\Payments\Support\RequestOptions;
 use NoriaLabs\Payments\Support\RetryPolicy;
 
@@ -113,4 +114,39 @@ it('exposes machine-readable codeName on every typed exception', function (): vo
     expect((new AuthenticationException('auth'))->codeName)->toBe('AUTHENTICATION_ERROR')
         ->and((new NetworkException('network'))->codeName)->toBe('NETWORK_ERROR')
         ->and((new TimeoutException('timeout'))->codeName)->toBe('TIMEOUT_ERROR');
+});
+
+it('stringifies amounts without leaking float rounding artefacts', function (): void {
+    expect(Payload::amountToString(0.1 + 0.2))->toBe('0.3')
+        ->and(Payload::amountToString(10.50))->toBe('10.5')
+        ->and(Payload::amountToString(100.0))->toBe('100')
+        ->and(Payload::amountToString(1500.75))->toBe('1500.75')
+        ->and(Payload::amountToString(10))->toBe('10')
+        ->and(Payload::amountToString('1500.00'))->toBe('1500.00')
+        ->and(Payload::amountToString(true))->toBe('1');
+
+    expect(Payload::stringifyAmount(['amount' => 0.1 + 0.2]))->toBe(['amount' => '0.3'])
+        ->and(Payload::stringifyAmount(['Amount' => 10.50]))->toBe(['Amount' => '10.5']);
+});
+
+it('leaves non-scalar amount values untouched instead of erroring', function (): void {
+    $payload = ['amount' => ['value' => 10, 'currency' => 'KES']];
+
+    expect(Payload::stringifyAmount($payload))->toBe($payload);
+});
+
+it('carries the new validate and business-error request options', function (): void {
+    $options = RequestOptions::fromArray([
+        'validate' => false,
+        'throw_on_business_error' => true,
+    ]);
+
+    expect($options->validate)->toBeFalse()
+        ->and($options->throwOnBusinessError)->toBeTrue();
+
+    $camel = RequestOptions::fromArray(['throwOnBusinessError' => 'false']);
+
+    expect($camel->throwOnBusinessError)->toBeFalse()
+        ->and($camel->validate)->toBeNull()
+        ->and(RequestOptions::fromArray([])->throwOnBusinessError)->toBeNull();
 });

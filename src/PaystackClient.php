@@ -5,6 +5,7 @@ namespace NoriaLabs\Payments;
 use Illuminate\Http\Client\Factory;
 use NoriaLabs\Payments\Contracts\AccessTokenProvider;
 use NoriaLabs\Payments\Exceptions\ConfigurationException;
+use NoriaLabs\Payments\Support\BusinessStatus;
 use NoriaLabs\Payments\Support\Hooks;
 use NoriaLabs\Payments\Support\HttpTransport;
 use NoriaLabs\Payments\Support\RequestOptions;
@@ -33,6 +34,8 @@ class PaystackClient
         'submit_charge_birthday' => ['POST', '/charge/submit_birthday'],
         'submit_charge_address' => ['POST', '/charge/submit_address'],
         'check_pending_charge' => ['GET', '/charge/{reference}'],
+
+        'requery_capitec_pay_charge' => ['POST', '/capitec-pay/requery/{ref}'],
 
         'initiate_bulk_charge' => ['POST', '/bulkcharge'],
         'list_bulk_charge_batches' => ['GET', '/bulkcharge'],
@@ -213,6 +216,8 @@ class PaystackClient
         private readonly HttpTransport $http,
         private readonly AccessTokenProvider $tokens,
         private readonly array $endpoints = self::ENDPOINTS,
+        private readonly bool $throwOnBusinessError = false,
+        private readonly ?string $publicKey = null,
     ) {}
 
     public static function make(
@@ -234,6 +239,8 @@ class PaystackClient
             http: $transport,
             tokens: $tokenProvider ?? self::secretKeyTokenProvider($config),
             endpoints: self::resolveEndpoints($config),
+            throwOnBusinessError: self::boolean($config['throw_on_business_error'] ?? false),
+            publicKey: self::nullableString($config['public_key'] ?? null),
         );
     }
 
@@ -347,6 +354,46 @@ class PaystackClient
     public function checkPendingCharge(string|int $reference, array|RequestOptions|null $options = null): mixed
     {
         return $this->sendAuthorized('check_pending_charge', ['reference' => $reference], options: $options);
+    }
+
+    /**
+     * Paystack authorises this endpoint with your PUBLIC key, not the secret key.
+     * Pass it here, configure `payments.paystack.public_key`, or set `access_token`
+     * in `$options`.
+     */
+    public function requeryCapitecPayCharge(
+        string|int $reference,
+        ?string $publicKey = null,
+        array|RequestOptions|null $options = null,
+    ): mixed {
+        $publicKey ??= $this->publicKey;
+        $resolved = RequestOptions::fromArray($options);
+
+        // An explicit access_token in $options always wins.
+        if ($publicKey !== null && $resolved->accessToken === null) {
+            $options = new RequestOptions(
+                headers: $resolved->headers,
+                timeoutSeconds: $resolved->timeoutSeconds,
+                retry: $resolved->retry,
+                accessToken: $publicKey,
+                forceTokenRefresh: $resolved->forceTokenRefresh,
+                amountNormalization: $resolved->amountNormalization,
+                validate: $resolved->validate,
+                throwOnBusinessError: $resolved->throwOnBusinessError,
+            );
+        }
+
+        return $this->sendAuthorized('requery_capitec_pay_charge', ['ref' => $reference], options: $options);
+    }
+
+    public static function succeeded(mixed $response): ?bool
+    {
+        return BusinessStatus::succeeded(BusinessStatus::PAYSTACK, $response);
+    }
+
+    public static function statusMessage(mixed $response): ?string
+    {
+        return BusinessStatus::statusMessage(BusinessStatus::PAYSTACK, $response);
     }
 
     public function initiateBulkCharge(array $payload, array|RequestOptions|null $options = null): mixed
@@ -1102,14 +1149,18 @@ class PaystackClient
             'Accept' => 'application/json',
         ]);
 
-        return $this->http->send(
-            path: $path,
-            method: $method,
-            headers: $headers,
-            query: $query,
-            body: $payload,
-            timeoutSeconds: $requestOptions->timeoutSeconds,
-            retry: $requestOptions->retry,
+        return $this->assertBusinessStatus(
+            $this->http->send(
+                path: $path,
+                method: $method,
+                headers: $headers,
+                query: $query,
+                body: $payload,
+                timeoutSeconds: $requestOptions->timeoutSeconds,
+                retry: $requestOptions->retry,
+            ),
+            $requestOptions,
+            "Paystack {$method} {$path}",
         );
     }
 
@@ -1129,15 +1180,28 @@ class PaystackClient
             'Accept' => 'application/json',
         ]);
 
-        return $this->http->send(
-            path: $path,
-            method: $method,
-            headers: $headers,
-            query: $query,
-            body: $payload,
-            timeoutSeconds: $requestOptions->timeoutSeconds,
-            retry: $requestOptions->retry,
+        return $this->assertBusinessStatus(
+            $this->http->send(
+                path: $path,
+                method: $method,
+                headers: $headers,
+                query: $query,
+                body: $payload,
+                timeoutSeconds: $requestOptions->timeoutSeconds,
+                retry: $requestOptions->retry,
+            ),
+            $requestOptions,
+            "Paystack {$method} {$path}",
         );
+    }
+
+    private function assertBusinessStatus(mixed $response, RequestOptions $options, string $context): mixed
+    {
+        if ($options->throwOnBusinessError ?? $this->throwOnBusinessError) {
+            BusinessStatus::assert(BusinessStatus::PAYSTACK, $response, $context);
+        }
+
+        return $response;
     }
 
     /**
@@ -1229,5 +1293,14 @@ class PaystackClient
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
+    }
+
+    private static function boolean(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 }

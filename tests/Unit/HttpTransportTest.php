@@ -522,3 +522,22 @@ it('falls through the retry loop and uses the default usleep sleeper when no sle
 
     expect(true)->toBeTrue();
 });
+
+it('sends an empty json object rather than an empty array for bodyless posts', function (): void {
+    Http::fake([
+        'https://api.example.test/*' => Http::response(['ok' => true], 200),
+    ]);
+
+    $transport = new HttpTransport(
+        http: Http::getFacadeRoot(),
+        baseUrl: 'https://api.example.test',
+    );
+
+    $transport->send('/no-body', 'POST', body: []);
+    $transport->send('/with-body', 'POST', body: ['a' => 1]);
+    $transport->send('/list-body', 'POST', body: [['a' => 1]]);
+
+    $bodies = collect(Http::recorded())->map(fn (array $record): string => $record[0]->body())->all();
+
+    expect($bodies)->toBe(['{}', '{"a":1}', '[{"a":1}]']);
+});

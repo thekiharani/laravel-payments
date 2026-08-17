@@ -131,3 +131,50 @@ it('rejects an invalid configured public key', function (): void {
     expect(fn () => $verifier->verify('{}', base64_encode('signature')))
         ->toThrow(ConfigurationException::class, 'valid OpenSSL public key');
 });
+
+it('supports per-route middleware options for the unsigned validation endpoint', function (): void {
+    [$privateKey, $publicKey] = kcbBuniKeyPair();
+    config()->set('payments.kcb_buni.ipn_security.public_key', $publicKey);
+
+    // /validation is the one route KCB sends without a Signature header.
+    Route::post('/kcb-buni/ipn/account', fn () => response('ok'))
+        ->middleware(VerifyKcbBuniIpn::class);
+    Route::post('/kcb-buni/ipn/validation', fn () => response('ok'))
+        ->middleware(VerifyKcbBuniIpn::class.':no-signature');
+
+    $payload = ['requestId' => 'REQ1', 'customerReference' => 'ACC1', 'organizationReference' => 'ORG1'];
+
+    $this->postJson('/kcb-buni/ipn/validation', $payload)->assertOk();
+    $this->postJson('/kcb-buni/ipn/account', $payload)->assertForbidden();
+
+    $signed = ['transactionReference' => 'FT1'];
+    $this->postJson('/kcb-buni/ipn/account', $signed, [
+        'Signature' => kcbBuniSignature(json_encode($signed), $privateKey),
+    ])->assertOk();
+});
+
+it('registers middleware aliases and enforces ip allowlisting per route', function (): void {
+    config()->set('payments.kcb_buni.ipn_security.trusted_ips', ['203.0.113.10']);
+    config()->set('payments.kcb_buni.ipn_security.verify_signature', false);
+
+    Route::post('/kcb-buni/ipn/aliased', fn () => response('ok'))
+        ->middleware('kcb-buni.ipn:ip,no-signature');
+
+    $this->postJson('/kcb-buni/ipn/aliased', ['transactionReference' => 'FT1'])->assertForbidden();
+
+    $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.10'])
+        ->postJson('/kcb-buni/ipn/aliased', ['transactionReference' => 'FT1'])
+        ->assertOk();
+});
+
+it('rejects unknown middleware options instead of silently ignoring them', function (): void {
+    config()->set('payments.kcb_buni.ipn_security.verify_signature', false);
+
+    Route::post('/kcb-buni/ipn/bad-option', fn () => response('ok'))
+        ->middleware(VerifyKcbBuniIpn::class.':no-signatures');
+
+    $this->withoutExceptionHandling();
+
+    expect(fn () => $this->postJson('/kcb-buni/ipn/bad-option', []))
+        ->toThrow(ConfigurationException::class, 'Unknown payment verification middleware option [no-signatures]');
+});

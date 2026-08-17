@@ -21,6 +21,7 @@ return [
     ],
 
     'mpesa' => [
+        'throw_on_business_error' => env('MPESA_THROW_ON_BUSINESS_ERROR', false),
         'environment' => env('MPESA_ENVIRONMENT', 'sandbox'),
         'base_url' => env('MPESA_BASE_URL'),
         'consumer_key' => env('MPESA_CONSUMER_KEY'),
@@ -34,6 +35,7 @@ return [
     ],
 
     'sasapay' => [
+        'throw_on_business_error' => env('SASAPAY_THROW_ON_BUSINESS_ERROR', false),
         'environment' => env('SASAPAY_ENVIRONMENT', 'sandbox'),
         'base_url' => env('SASAPAY_BASE_URL'),
         'waas_base_url' => env('SASAPAY_WAAS_BASE_URL'),
@@ -78,6 +80,8 @@ return [
     ],
 
     'kcb_buni' => [
+        'validate_payloads' => env('KCB_BUNI_VALIDATE_PAYLOADS', true),
+        'throw_on_business_error' => env('KCB_BUNI_THROW_ON_BUSINESS_ERROR', false),
         'environment' => env('KCB_BUNI_ENVIRONMENT', 'uat'),
         'base_url' => env('KCB_BUNI_BASE_URL'),
         'token_url' => env('KCB_BUNI_TOKEN_URL'),
@@ -103,8 +107,10 @@ return [
     ],
 
     'paystack' => [
+        'throw_on_business_error' => env('PAYSTACK_THROW_ON_BUSINESS_ERROR', false),
         'base_url' => env('PAYSTACK_BASE_URL', 'https://api.paystack.co'),
         'secret_key' => env('PAYSTACK_SECRET_KEY'),
+        'public_key' => env('PAYSTACK_PUBLIC_KEY'),
         'endpoints' => [],
         'webhook_security' => [
             'secret_key' => env('PAYSTACK_WEBHOOK_SECRET_KEY', env('PAYSTACK_SECRET_KEY')),

@@ -46,6 +46,12 @@ It also registers the facade alias:
 
 - `Payments`
 
+And these route middleware aliases:
+
+- `kcb-buni.ipn` → `VerifyKcbBuniIpn`
+- `sasapay.callback` → `VerifySasaPayCallback`
+- `paystack.webhook` → `VerifyPaystackWebhook`
+
 ## Config
 
 Published config file: `config/payments.php`
@@ -81,8 +87,9 @@ Top-level sections:
 
 | Key | Description |
 | --- | --- |
-| `environment` | `sandbox` or `production`. |
+| `environment` | `sandbox` or `production`. Any other value requires an explicit `base_url`, otherwise the client throws `ConfigurationException`. |
 | `base_url` | Optional full base URL override. |
+| `throw_on_business_error` | Throw `BusinessException` when Daraja answers HTTP 200 with an `errorCode` or a non-zero `ResponseCode`/`ResultCode`. Defaults to `false`. See [Business-Level Failures](#business-level-failures). |
 | `consumer_key` | Daraja consumer key. |
 | `consumer_secret` | Daraja consumer secret. |
 | `token_cache_skew_seconds` | Refresh token before expiry by this many seconds. |
@@ -96,9 +103,10 @@ Top-level sections:
 
 | Key | Description |
 | --- | --- |
-| `environment` | `sandbox` or `production`. |
-| `base_url` | SasaPay v1 base URL. Sandbox defaults to `https://sandbox.sasapay.app/api/v1`. Production must be supplied explicitly. |
-| `waas_base_url` | SasaPay WAAS v2 base URL. Sandbox defaults to `https://sandbox.sasapay.app/api/v2/waas`. Production must be supplied explicitly before using WAAS methods. |
+| `environment` | `sandbox` or `production`. Any other value requires an explicit `base_url`. |
+| `base_url` | SasaPay v1 base URL. Defaults to `https://sandbox.sasapay.app/api/v1` in sandbox and `https://api.sasapay.app/api/v1` in production. |
+| `waas_base_url` | SasaPay WAAS v2 base URL. Defaults to `https://sandbox.sasapay.app/api/v2/waas` in sandbox and `https://api.sasapay.app/api/v2/waas` in production. |
+| `throw_on_business_error` | Throw `BusinessException` when SasaPay answers HTTP 200 with `"status": false`. Defaults to `false`. See [Business-Level Failures](#business-level-failures). |
 | `client_id` | SasaPay v1 client ID. Also used for WAAS unless WAAS-specific credentials are configured. |
 | `client_secret` | SasaPay v1 client secret. Also used for WAAS unless WAAS-specific credentials are configured. |
 | `waas_client_id` | Optional WAAS-specific client ID. |
@@ -117,14 +125,21 @@ Top-level sections:
 | `callback_security.enforce_ip_whitelist` | Reject callbacks from non-allowlisted IPs when using `verifyRequest()` or the middleware. Defaults to `false`; enable it after Laravel trusted proxy handling is configured for your deployment. |
 | `callback_security.verify_signature` | Verify callback HMAC signatures when using `verifyRequest()` or the middleware. Defaults to `true`; set `SASAPAY_CALLBACK_VERIFY_SIGNATURE=false` only if you intentionally rely on a different callback-authentication control. |
 
-SasaPay production hosts are not hard-coded. The reviewed SasaPay docs document sandbox hosts clearly, but production hosts are created through SasaPay production applications. Provide production `base_url` and `waas_base_url` explicitly.
+SasaPay's published documentation shows the sandbox hosts only. The production
+defaults (`https://api.sasapay.app/api/v1` and `https://api.sasapay.app/api/v2/waas`)
+were established by probing the live hosts: `POST /auth/token/` on each returns
+SasaPay's own credential error, identical to the sandbox host. Override
+`base_url` / `waas_base_url` if SasaPay issues your production application a
+different host.
 
 ### KCB Buni Config
 
 | Key | Description |
 | --- | --- |
-| `environment` | Defaults to `uat`, matching the public Buni DevPortal endpoint URLs. |
-| `base_url` | Optional full base URL override. Required for any non-`uat` environment because Buni production URLs are not published in the verified docs. |
+| `environment` | `uat` (default) or `production`. Anything else requires an explicit `base_url`. |
+| `base_url` | Optional full base URL override. |
+| `validate_payloads` | Validate outbound payloads against the constraints published in Buni's OpenAPI documents before sending. Defaults to `true`. See [KCB Buni Payload Validation](#kcb-buni-payload-validation). |
+| `throw_on_business_error` | Throw `BusinessException` when Buni answers HTTP 200 with a non-zero status. Defaults to `false`. See [Business-Level Failures](#business-level-failures). |
 | `token_url` | Optional full OAuth token URL override. |
 | `token_path` | Token path used with `base_url` when `token_url` is unset. Defaults to `/token`. |
 | `consumer_key` | Buni application consumer key. |
@@ -142,7 +157,19 @@ SasaPay production hosts are not hard-coded. The reviewed SasaPay docs document 
 | `ipn_security.enforce_ip_whitelist` | Reject IPNs from non-allowlisted IPs when using `verifyRequest()` or the middleware. Defaults to `false`. |
 | `ipn_security.verify_signature` | Verify the IPN `Signature` header over the raw request body. Defaults to `true`. |
 
-KCB Buni token acquisition is `POST /token` with HTTP Basic client credentials and `grant_type=client_credentials` as form data. This was verified against the UAT token endpoint: GET returns HTTP 405, while POST reaches OAuth client validation.
+KCB Buni token acquisition is `POST /token` with HTTP Basic client credentials and `grant_type=client_credentials` as form data. This was verified against the UAT token endpoint: GET returns HTTP 405, while POST reaches OAuth client validation. Buni also accepts `grant_type` as a query parameter; the form-encoded body used here works on both hosts.
+
+#### KCB Buni hosts
+
+| Environment | Host | How it was established |
+| --- | --- | --- |
+| `uat` | `https://uat.buni.kcbgroup.com` | Published on the Buni DevPortal. |
+| `production` | `https://api.buni.kcbgroup.com` | **Not published by KCB.** Determined by probing the live gateway: `/token` returns the same OAuth client-validation response as UAT, and `/mm/api/request/1.0.0/stkpush` returns the same WSO2 gateway response. |
+
+Because the production host is inferred rather than documented, confirm it with
+KCB before moving real money, or pin it yourself with `base_url`. Setting
+`KCB_BUNI_ENVIRONMENT=production` is a deliberate opt-in; every other environment
+name still fails fast with a `ConfigurationException`.
 
 ### Paystack Config
 
@@ -150,6 +177,8 @@ KCB Buni token acquisition is `POST /token` with HTTP Basic client credentials a
 | --- | --- |
 | `base_url` | Paystack API base URL. Defaults to `https://api.paystack.co`. Paystack uses your API key to determine test vs live mode. |
 | `secret_key` | Paystack secret key used as the bearer token. |
+| `public_key` | Optional Paystack public key. Used by `requeryCapitecPayCharge()`, which Paystack authorises with the public key rather than the secret key. |
+| `throw_on_business_error` | Throw `BusinessException` when Paystack answers HTTP 200 with `"status": false`. Defaults to `false`. See [Business-Level Failures](#business-level-failures). |
 | `endpoints` | Optional endpoint-path overrides keyed by `PaystackClient::ENDPOINTS`. |
 | `webhook_security.secret_key` | HMAC secret for inbound webhooks. Defaults to `PAYSTACK_SECRET_KEY`. |
 | `webhook_security.trusted_ips` | Paystack webhook source IP allowlist. Defaults to the documented Paystack list. Override in published config or with comma-separated `PAYSTACK_WEBHOOK_TRUSTED_IPS`. |
@@ -236,10 +265,22 @@ $response = $buni->mpesaStkPush([
     'sharedShortCode' => true,
     'orgShortCode' => '',
     'orgPassKey' => '',
-    'callbackUrl' => 'https://example.com/kcb-buni/ipn',
+    'callbackUrl' => 'https://example.com/kcb-buni/stk-callback',
     'transactionDescription' => 'school fees',
 ], messageId: '232323_KCBOrg_8875661561', routeCode: '207');
 ```
+
+The payload is validated against the constraints in Buni's own M-PESA Express
+schema before it is sent — `transactionDescription` is capped at 13 characters,
+`phoneNumber` must be `2547XXXXXXXX`, `messageId` at 32, and so on. See
+[KCB Buni Payload Validation](#kcb-buni-payload-validation).
+
+> **`callbackUrl` is not the IPN endpoint.** The route you pass here receives
+> Safaricom's Daraja-shaped STK result (`Body.stkCallback`) relayed by KCB. It is
+> **unsigned** — it carries no `Signature` header — so do **not** put the
+> `VerifyKcbBuniIpn` middleware on it. Instant Payment Notifications are a
+> separate, signed API on separate routes; see
+> [KCB Buni IPN Security](#kcb-buni-ipn-security).
 
 ### KCB Buni Funds Transfer
 
@@ -372,16 +413,56 @@ Canonical callback fields include documented aliases across C2B, IPN, checkout/c
 
 ### KCB Buni IPN Security
 
-KCB Buni IPN docs specify a `Signature` header containing a SHA256withRSA signature of the raw request body, signed by KCB and verified with the KCB public key.
+Buni's `InstantPaymentNotification` API (context `/ipn`, version `1.0.0`) defines
+three inbound routes that KCB calls on **your** host. They do not share one
+contract:
 
-Use the middleware on your IPN route:
+| Buni route | `Signature` header | Body | Response you must return |
+| --- | --- | --- | --- |
+| `/till-notification` | **required** | nested `header` + `requestPayload.additionalData.notificationData` | `header` + `responsePayload.transactionInfo` |
+| `/account-notification` | **required** | flat transaction fields | `transactionID`, `statusCode`, `statusMessage` |
+| `/validation` | **not sent** | `requestId`, `customerReference`, `organizationReference` | the above plus optional `CustomerName`, `billAmount`, `currency`, `billType`, `creditAccountIdentifier` |
+
+The `Signature` header is a base64 SHA256withRSA signature of the raw request
+body, signed by KCB and verified with the KCB public key.
+
+Because `/validation` carries no signature, the middleware takes per-route
+options. Applying the default middleware there would reject every validation
+request with HTTP 403:
 
 ```php
 use NoriaLabs\Payments\Http\Middleware\VerifyKcbBuniIpn;
 
-Route::post('/kcb-buni/ipn', KcbBuniIpnController::class)
+// Signed notification routes — default configuration.
+Route::post('/kcb-buni/ipn/till', TillNotificationController::class)
     ->middleware(VerifyKcbBuniIpn::class);
+
+Route::post('/kcb-buni/ipn/account', AccountNotificationController::class)
+    ->middleware(VerifyKcbBuniIpn::class);
+
+// Unsigned validation route — opt out of signature verification.
+Route::post('/kcb-buni/ipn/validation', ValidationController::class)
+    ->middleware('kcb-buni.ipn:no-signature');
 ```
+
+The package registers the aliases `kcb-buni.ipn`, `sasapay.callback` and
+`paystack.webhook`. All three accept the same options, and several can be
+combined:
+
+| Option | Effect |
+| --- | --- |
+| `signature` | Force signature verification on for this route. |
+| `no-signature` | Skip signature verification for this route. |
+| `ip` | Enforce the configured source-IP allowlist for this route. |
+| `no-ip` | Skip the source-IP allowlist for this route. |
+
+```php
+Route::post('/kcb-buni/ipn/validation', ValidationController::class)
+    ->middleware('kcb-buni.ipn:no-signature,ip');
+```
+
+An unrecognised option throws `ConfigurationException` rather than being silently
+ignored.
 
 Or verify manually:
 
@@ -398,6 +479,52 @@ public function __invoke(Request $request, KcbBuniIpnVerifier $verifier)
     // Process the already-authenticated IPN payload.
 }
 ```
+
+#### Reading IPN payloads and building acknowledgements
+
+`NoriaLabs\Payments\Support\KcbBuniIpn` models the three contracts so you do not
+have to hand-assemble the nested till envelope or remember which acknowledgement
+shape each route expects.
+
+```php
+use NoriaLabs\Payments\Support\KcbBuniIpn;
+
+public function __invoke(Request $request)
+{
+    $payload = $request->all();
+
+    return match (KcbBuniIpn::type($payload)) {
+        // Nested envelope: transaction fields live under
+        // requestPayload.additionalData.notificationData
+        KcbBuniIpn::TYPE_TILL => response()->json(
+            KcbBuniIpn::tillAcknowledgement(
+                $payload,
+                $this->recordTill(KcbBuniIpn::tillNotificationData($payload)),
+            )
+        ),
+
+        // Flat envelope
+        KcbBuniIpn::TYPE_ACCOUNT => response()->json(
+            KcbBuniIpn::accountAcknowledgement($this->recordAccount($payload))
+        ),
+
+        KcbBuniIpn::TYPE_VALIDATION => response()->json(
+            KcbBuniIpn::validationResponse('LOCAL-1', [
+                'CustomerName' => 'JOHN DOE',
+                'billAmount' => '1500.00',
+                'currency' => 'KES',
+            ])
+        ),
+
+        default => response()->json(
+            KcbBuniIpn::rejection($payload, '1', 'Unrecognised notification'), 400
+        ),
+    };
+}
+```
+
+`KcbBuniIpn::rejection()` mirrors whichever contract the inbound payload belongs
+to, so a rejection is shaped correctly without a second branch.
 
 ## Manager Usage
 
@@ -430,9 +557,53 @@ $buni = $manager->kcbBuni([
 
 ## KCB Buni Coverage
 
-The KCB Buni client keeps Buni field names exactly as documented. It does not translate `phoneNumber`, `callbackUrl`, `transactionReference`, or nested request payloads. The only automatic payload normalization is string-casting `amount` for `mpesaStkPush()` by default, matching the Buni M-PESA Express schema. Set `amount_normalization` to `none` when you need to preserve raw JSON number types.
+The KCB Buni client keeps Buni field names exactly as documented. It does not translate `phoneNumber`, `callbackUrl`, `transactionReference`, or nested request payloads. The only automatic payload normalization is string-casting `amount` for `mpesaStkPush()` by default, matching the Buni M-PESA Express schema. Set `amount_normalization` to `none` when you need to preserve raw JSON number types. Note that `debitAmount` on `transferFunds()` is never stringified — Buni's Funds Transfer schema types it as a JSON number.
 
-The verified public DevPortal exposes UAT endpoint URLs. Production hosts are not hard-coded; configure `payments.kcb_buni.base_url` after KCB confirms your production endpoint.
+### KCB Buni Payload Validation
+
+`mpesaStkPush()` and `transferFunds()` validate their payloads against the
+constraints published in Buni's own OpenAPI documents before the request leaves
+your app, so an over-long or malformed field fails locally with a precise message
+instead of a generic gateway rejection. The rule sets are public constants —
+`KcbBuniClient::MPESA_STK_PUSH_RULES`, `::MPESA_STK_PUSH_HEADER_RULES` and
+`::FUNDS_TRANSFER_RULES`.
+
+```php
+use NoriaLabs\Payments\Exceptions\ValidationException;
+
+try {
+    $buni->mpesaStkPush($payload, messageId: $id, routeCode: '207');
+} catch (ValidationException $e) {
+    $e->getMessage();  // "KCB Buni M-PESA Express payload is invalid: [transactionDescription] must not exceed 13 characters, got 21."
+    $e->errors;        // ['[transactionDescription] must not exceed 13 characters, got 21.']
+}
+```
+
+Required fields are checked for presence rather than non-emptiness where Buni's
+schema allows a blank value — `orgShortCode` and `orgPassKey` must be present but
+may be `''` when `sharedShortCode` is `true`.
+
+Turn it off globally with `payments.kcb_buni.validate_payloads = false`, or per
+call when you need to send something the published schema does not describe:
+
+```php
+$buni->transferFunds($payload, ['validate' => false]);
+$buni->transferFunds($payload, new RequestOptions(validate: false));
+```
+
+Validation never applies to `authorizedPost()` / `authorizedGet()`.
+
+### KCB Buni Endpoint Provenance
+
+Not every endpoint below comes from the same source, which matters when you
+subscribe an application on the Buni DevPortal:
+
+- **In the DevPortal API catalog** (`MpesaExpressAPIService`, `FundsTransferAPIService`, `VENDINGGATEWAYAPIS`, `KCBKEeTIMSKraServices`, `KCBBIIpsP2PTransferStatusInquiry`, `InstantPaymentNotification`) — subscribable, with published OpenAPI documents.
+- **Live on the gateway but absent from the catalog**: `queryCoreTransactionStatus()` and `queryTransactionDetails()`. Both resolve on the UAT gateway with the methods this package uses (`POST` and `GET` respectively, each returning HTTP 401 without credentials), but they are not listed as subscribable API products. A standard Buni application subscription may not grant your token access to them — ask KCB to enable them.
+- **Not deployed on UAT**: `p2pTransferStatusInquiry()` is in the catalog but its UAT gateway route returns 404. Exercise it against the environment KCB enables for your subscription.
+
+The DevPortal publishes UAT endpoint URLs only; see
+[KCB Buni hosts](#kcb-buni-hosts) for how the production host was established.
 
 ### KCB Buni Auth and IPN
 
@@ -443,19 +614,41 @@ The verified public DevPortal exposes UAT endpoint URLs. Production hosts are no
 | `KcbBuniIpnVerifier::verifyRequest()` | Extracts the raw body, `Signature` header, and IP from a Laravel request. |
 | `KcbBuniIpnVerifier::isTrustedIp()` | Checks the configured KCB Buni IPN IP allowlist. |
 | `KcbBuniIpnVerifier::verifiesSignature()` | Shows whether signature verification is enabled by default. |
-| `VerifyKcbBuniIpn` middleware | Rejects invalid Laravel IPN requests with HTTP 403 according to IPN-security config. |
+| `VerifyKcbBuniIpn` middleware | Rejects invalid Laravel IPN requests with HTTP 403. Accepts per-route `signature` / `no-signature` / `ip` / `no-ip` options. |
+| `KcbBuniIpn::type()` | Identifies which of the three inbound IPN contracts a payload belongs to. |
+| `KcbBuniIpn::tillNotificationData()` | Reads `requestPayload.additionalData.notificationData` from a till notification. |
+| `KcbBuniIpn::tillAcknowledgement()` | Builds the `/till-notification` acknowledgement, echoing the inbound `messageID`. |
+| `KcbBuniIpn::accountAcknowledgement()` | Builds the `/account-notification` acknowledgement. |
+| `KcbBuniIpn::validationResponse()` | Builds the `/validation` response, including the optional bill fields. |
+| `KcbBuniIpn::rejection()` | Builds a non-zero-status response shaped to match the inbound contract. |
 
 ### KCB Buni Outbound APIs
 
-| Method | Verified endpoint |
-| --- | --- |
-| `mpesaStkPush($payload, $messageId)` | `POST /mm/api/request/1.0.0/stkpush` |
-| `transferFunds()` | `POST /fundstransfer/1.0.0/api/v1/transfer` |
-| `queryCoreTransactionStatus()` | `POST /v1/core/t24/querytransaction/1.0.0/api/transactioninfo` |
-| `queryTransactionDetails($identifier)` | `GET /kcb/transaction/query/1.0.0/api/v1/payment/query/{identifier}` |
-| `vendingValidateRequest()` | `POST /kcb/vendingGateway/v1/1.0.0/api/validate-request` |
-| `vendingVendorConfirmation()` | `POST /kcb/vendingGateway/v1/1.0.0/api/vendor-confirmation` |
-| `vendingTransactionStatus()` | `POST /kcb/vendingGateway/v1/1.0.0/api/query/transaction-status` |
+| Method | Endpoint | Source |
+| --- | --- | --- |
+| `mpesaStkPush($payload, $messageId)` | `POST /mm/api/request/1.0.0/stkpush` | DevPortal catalog |
+| `transferFunds()` | `POST /fundstransfer/1.0.0/api/v1/transfer` | DevPortal catalog |
+| `vendingValidateRequest()` | `POST /kcb/vendingGateway/v1/1.0.0/api/validate-request` | DevPortal catalog |
+| `vendingVendorConfirmation()` | `POST /kcb/vendingGateway/v1/1.0.0/api/vendor-confirmation` | DevPortal catalog |
+| `vendingTransactionStatus()` | `POST /kcb/vendingGateway/v1/1.0.0/api/query/transaction-status` | DevPortal catalog |
+| `etimsRequest($path, $payload, $method)` | `/kcb/ke/kra/etims/1.0.0/{path}` | DevPortal catalog (wildcard resource) |
+| `p2pTransferStatusInquiry($payload, $path)` | `POST /kcb/bi/ips/p2p/transfer/status/inquiry/1.0.0/{path}` | DevPortal catalog (not deployed on UAT) |
+| `queryCoreTransactionStatus()` | `POST /v1/core/t24/querytransaction/1.0.0/api/transactioninfo` | Live gateway, not in catalog |
+| `queryTransactionDetails($identifier)` | `GET /kcb/transaction/query/1.0.0/api/v1/payment/query/{identifier}` | Live gateway, not in catalog |
+
+`KCBKEeTIMSKraServices` and `KCBBIIpsP2PTransferStatusInquiry` publish a single
+wildcard resource with no request schema, so the concrete operation path and body
+come from the integration pack KCB issues with your subscription:
+
+```php
+$buni->etimsRequest('api/v1/sales', ['invoiceNumber' => 'INV-1']);
+$buni->etimsRequest('api/v1/sales/INV-1', method: 'GET', query: ['detail' => 'full']);
+
+$buni->p2pTransferStatusInquiry(['transactionReference' => 'FT000262556']);
+```
+
+The `InstantPaymentNotification` API is inbound-only — KCB calls your host. See
+[KCB Buni IPN Security](#kcb-buni-ipn-security).
 
 ### KCB Buni Raw Authorized Helpers
 
@@ -504,6 +697,7 @@ Paystack uses one API host for test and live mode: `https://api.paystack.co`. Th
 | `submitChargeBirthday()` | `POST /charge/submit_birthday` |
 | `submitChargeAddress()` | `POST /charge/submit_address` |
 | `checkPendingCharge($reference)` | `GET /charge/{reference}` |
+| `requeryCapitecPayCharge($reference, $publicKey)` | `POST /capitec-pay/requery/{ref}` — authorised with your **public** key |
 | `initiateBulkCharge()` | `POST /bulkcharge` |
 | `listBulkChargeBatches()` | `GET /bulkcharge` |
 | `fetchBulkChargeBatch($code)` | `GET /bulkcharge/{code}` |
@@ -850,6 +1044,7 @@ The SasaPay docs also contain status-code pages. Those pages document static val
 | `billManagerUpdateSingleInvoice()` | `POST /v1/billmanager-invoice/change-invoice` |
 | `billManagerUpdateBulkInvoice()` | `POST /v1/billmanager-invoice/change-invoices` |
 | `ratibaStandingOrder()` | `POST /standingorder/v1/createStandingOrderExternal` |
+| `registerPullTransactions()` | `POST /pulltransactions/v1/register` |
 | `pullTransactions()` | `POST /pulltransactions/v1/query` |
 
 M-PESA methods intentionally preserve Daraja field names. The client only string-casts `Amount` or `amount` when present by default and, for the named B2B product helpers, adds the documented `CommandID` only when the caller has not supplied one. Set `amount_normalization` to `none` globally or per request when you need to preserve raw JSON number types.
@@ -891,6 +1086,8 @@ Fields:
 | `access_token` | Explicit bearer token override. |
 | `force_token_refresh` | Forces the next token lookup to refresh. |
 | `amount_normalization` | Per-request override for providers that normalize amount fields by default. Use `none` to preserve raw numeric `Amount` and `amount` values for SasaPay, M-PESA, and KCB Buni M-PESA Express calls. |
+| `validate` | Per-request override for [KCB Buni payload validation](#kcb-buni-payload-validation). `false` sends the payload through untouched. |
+| `throw_on_business_error` | Per-request override for [business-level failure handling](#business-level-failures). `true` throws `BusinessException` when the provider reports a failure inside an HTTP 200 body. |
 
 Example:
 
@@ -982,12 +1179,77 @@ The package throws:
 - `NoriaLabs\Payments\Exceptions\TimeoutException`
 - `NoriaLabs\Payments\Exceptions\NetworkException`
 - `NoriaLabs\Payments\Exceptions\ApiException`
+- `NoriaLabs\Payments\Exceptions\ValidationException`
+- `NoriaLabs\Payments\Exceptions\BusinessException`
+
+All of them extend `PaymentsException` and expose a machine-readable `codeName`.
 
 `ApiException` includes:
 
 - `statusCode`
 - `responseBody`
 - `details`
+
+`ValidationException` includes `errors`, the list of individual field failures.
+
+`BusinessException` includes `provider`, `statusCode` and `responseBody`.
+
+## Business-Level Failures
+
+**Every provider in this package can answer HTTP 200 while reporting a failure in
+the body.** `HttpTransport` only maps transport and HTTP-status failures, so by
+default a rejected transfer is returned to you as an ordinary response array:
+
+| Provider | Failure marker |
+| --- | --- |
+| KCB Buni | `header.statusCode` other than `"0"`, or `response.ResponseCode` other than `0` |
+| M-PESA Daraja | an `errorCode` field, or `ResponseCode` / `ResultCode` other than `0` |
+| SasaPay | `"status": false` |
+| Paystack | `"status": false` |
+
+The default is unchanged for backwards compatibility — you must opt in. There are
+two ways.
+
+**Inspect explicitly.** Each client exposes static readers that never throw and
+return `null` for a shape they do not recognise, so a new response format is
+never misread as a failure:
+
+```php
+$response = $buni->transferFunds($payload);
+
+if (KcbBuniClient::succeeded($response) === false) {
+    report(new RuntimeException(KcbBuniClient::statusMessage($response)));
+}
+```
+
+`MpesaClient`, `SasaPayClient` and `PaystackClient` expose the same `succeeded()`
+and `statusMessage()` readers (`statusCode()` too, except on Paystack).
+
+**Or let the client throw.** Enable it per provider, or per request:
+
+```php
+// config/payments.php
+'kcb_buni' => ['throw_on_business_error' => true],
+
+// or per call
+$buni->transferFunds($payload, ['throw_on_business_error' => true]);
+```
+
+```php
+use NoriaLabs\Payments\Exceptions\BusinessException;
+
+try {
+    $buni->transferFunds($payload);
+} catch (BusinessException $e) {
+    $e->provider;      // 'kcb_buni'
+    $e->statusCode;    // '1'
+    $e->responseBody;  // the full decoded body
+}
+```
+
+Enabling this is strongly recommended for anything that moves money. It is
+off by default only so that upgrading the package cannot silently change how an
+existing integration handles responses.
 
 ## Async Settlement
 
@@ -1024,12 +1286,30 @@ The M-PESA Daraja endpoint matrix was aligned with Safaricom's public Daraja por
 
 ## KCB Buni Documentation References
 
-The KCB Buni endpoint matrix was aligned with the public Buni DevPortal API metadata, OpenAPI documents, and M-PESA Express Postman/PDF artifacts available on May 3, 2026:
+The KCB Buni endpoint matrix, field constraints, IPN contracts and host list were
+re-verified on August 18, 2026 against the DevPortal API catalog (which returns
+exactly six APIs), the OpenAPI document of each, and live probes of the UAT and
+production gateways.
 
 - https://buni.kcbgroup.com/discover-apis
 - https://sandbox.buni.kcbgroup.com/api/am/devportal/v3/apis
-- https://sandbox.buni.kcbgroup.com/api/am/devportal/v3/apis/6396efd5-de10-4b04-adec-128f54349614
-- https://sandbox.buni.kcbgroup.com/api/am/devportal/v3/apis/6396efd5-de10-4b04-adec-128f54349614/swagger
+
+Per-API OpenAPI documents (`.../api/am/devportal/v3/apis/{id}/swagger`):
+
+| API | Context | ID |
+| --- | --- | --- |
+| `MpesaExpressAPIService` | `/mm/api/request` | `6396efd5-de10-4b04-adec-128f54349614` |
+| `FundsTransferAPIService` | `/fundstransfer` | `372552ef-5ebd-4921-9a0d-2f3b1da8cb86` |
+| `VENDINGGATEWAYAPIS` | `/kcb/vendingGateway/v1` | `906bbc54-0f39-4271-a912-290346764be7` |
+| `InstantPaymentNotification` | `/ipn` | `01b3ebbd-1452-4baf-a068-2913ecd3af73` |
+| `KCBKEeTIMSKraServices` | `/kcb/ke/kra/etims` | `d7a2b6ad-8047-4da6-9f90-54e50c9f1d8e` |
+| `KCBBIIpsP2PTransferStatusInquiry` | `/kcb/bi/ips/p2p/transfer/status/inquiry` | `7cf05ab8-5b43-42a0-ba9d-951bc5eb128e` |
+
+Findings that are **not** in KCB's published documentation and were established
+by probing the live gateway are labelled as such in
+[KCB Buni hosts](#kcb-buni-hosts) and
+[KCB Buni Endpoint Provenance](#kcb-buni-endpoint-provenance). Confirm them with
+KCB before relying on them in production.
 
 ## SasaPay Documentation References
 

@@ -9,13 +9,17 @@ use Symfony\Component\HttpFoundation\Response;
 
 class VerifySasaPayCallback
 {
+    use ResolvesVerificationFlags;
+
     public function __construct(
         private readonly SasaPayCallbackVerifier $verifier,
     ) {}
 
-    public function handle(Request $request, Closure $next): Response
+    public function handle(Request $request, Closure $next, string ...$flags): Response
     {
-        if (! $this->verifier->verifyRequest($request)) {
+        [$enforceIpWhitelist, $verifySignature] = $this->resolveVerificationFlags($flags);
+
+        if (! $this->verifier->verifyRequest($request, $enforceIpWhitelist, $verifySignature)) {
             abort(403, 'Invalid SasaPay callback.');
         }
 

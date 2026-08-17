@@ -6,6 +6,8 @@ class RequestOptions
 {
     /**
      * @param  array<string, string>  $headers
+     * @param  bool|null  $validate  null inherits the client setting
+     * @param  bool|null  $throwOnBusinessError  null inherits the client setting
      */
     public function __construct(
         public readonly array $headers = [],
@@ -14,6 +16,8 @@ class RequestOptions
         public readonly ?string $accessToken = null,
         public readonly bool $forceTokenRefresh = false,
         public readonly ?string $amountNormalization = null,
+        public readonly ?bool $validate = null,
+        public readonly ?bool $throwOnBusinessError = null,
     ) {}
 
     public static function fromArray(array|self|null $value): self
@@ -33,6 +37,23 @@ class RequestOptions
             accessToken: $value['access_token'] ?? null,
             forceTokenRefresh: (bool) ($value['force_token_refresh'] ?? false),
             amountNormalization: $value['amount_normalization'] ?? $value['amountNormalization'] ?? null,
+            validate: self::nullableBoolean($value['validate'] ?? null),
+            throwOnBusinessError: self::nullableBoolean(
+                $value['throw_on_business_error'] ?? $value['throwOnBusinessError'] ?? null
+            ),
         );
+    }
+
+    private static function nullableBoolean(mixed $value): ?bool
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 }

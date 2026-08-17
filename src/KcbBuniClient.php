@@ -6,8 +6,10 @@ use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Http\Client\Factory;
 use NoriaLabs\Payments\Contracts\AccessTokenProvider;
 use NoriaLabs\Payments\Exceptions\ConfigurationException;
+use NoriaLabs\Payments\Support\BusinessStatus;
 use NoriaLabs\Payments\Support\CachedAccessTokenProvider;
 use NoriaLabs\Payments\Support\ClientCredentialsTokenProvider;
+use NoriaLabs\Payments\Support\FieldRules;
 use NoriaLabs\Payments\Support\Hooks;
 use NoriaLabs\Payments\Support\HttpTransport;
 use NoriaLabs\Payments\Support\Payload;
@@ -16,8 +18,14 @@ use NoriaLabs\Payments\Support\RetryPolicy;
 
 class KcbBuniClient
 {
+    /**
+     * `uat` is published on the Buni DevPortal. `production` is NOT published by
+     * KCB — it was established by probing the live gateway. Confirm it with KCB
+     * before moving real money, or set `base_url` explicitly.
+     */
     public const BASE_URLS = [
         'uat' => 'https://uat.buni.kcbgroup.com',
+        'production' => 'https://api.buni.kcbgroup.com',
     ];
 
     public const ENDPOINTS = [
@@ -28,6 +36,45 @@ class KcbBuniClient
         'vending_validate_request' => '/kcb/vendingGateway/v1/1.0.0/api/validate-request',
         'vending_vendor_confirmation' => '/kcb/vendingGateway/v1/1.0.0/api/vendor-confirmation',
         'vending_transaction_status' => '/kcb/vendingGateway/v1/1.0.0/api/query/transaction-status',
+        'etims' => '/kcb/ke/kra/etims/1.0.0/{path}',
+        'p2p_transfer_status_inquiry' => '/kcb/bi/ips/p2p/transfer/status/inquiry/1.0.0/{path}',
+    ];
+
+    /**
+     * From the `MpesaExpressAPIService` OpenAPI document. All eight fields are
+     * required, but the short-code pair may be blank when `sharedShortCode` is true.
+     */
+    public const MPESA_STK_PUSH_RULES = [
+        'phoneNumber' => ['required' => true, 'notEmpty' => true, 'max' => 12, 'pattern' => '/^254\d{9}$/', 'format' => '2547XXXXXXXX'],
+        'amount' => ['required' => true, 'max' => 18, 'numeric' => true],
+        'invoiceNumber' => ['required' => true, 'notEmpty' => true, 'max' => 24],
+        'sharedShortCode' => ['required' => true, 'boolean' => true],
+        'orgShortCode' => ['required' => true, 'max' => 12],
+        'orgPassKey' => ['required' => true],
+        'callbackUrl' => ['required' => true, 'notEmpty' => true],
+        'transactionDescription' => ['required' => true, 'notEmpty' => true, 'max' => 13],
+    ];
+
+    public const MPESA_STK_PUSH_HEADER_RULES = [
+        'routeCode' => ['required' => true, 'notEmpty' => true, 'max' => 64],
+        'operation' => ['required' => true, 'notEmpty' => true, 'max' => 64],
+        'messageId' => ['required' => true, 'notEmpty' => true, 'max' => 32],
+    ];
+
+    /**
+     * From the `FundsTransferAPIService` OpenAPI document.
+     */
+    public const FUNDS_TRANSFER_RULES = [
+        'companyCode' => ['required' => true, 'notEmpty' => true, 'max' => 15],
+        'transactionType' => ['required' => true, 'notEmpty' => true, 'max' => 2],
+        'debitAccountNumber' => ['required' => true, 'notEmpty' => true, 'max' => 10],
+        'creditAccountNumber' => ['required' => true, 'notEmpty' => true, 'max' => 10],
+        'debitAmount' => ['required' => true, 'numeric' => true],
+        'paymentDetails' => ['required' => true, 'notEmpty' => true, 'max' => 35],
+        'transactionReference' => ['required' => true, 'notEmpty' => true, 'max' => 12],
+        'currency' => ['required' => true, 'notEmpty' => true, 'max' => 3],
+        'beneficiaryDetails' => ['required' => true, 'notEmpty' => true, 'max' => 35],
+        'beneficiaryBankCode' => ['max' => 20],
     ];
 
     /**
@@ -40,6 +87,8 @@ class KcbBuniClient
         private readonly array $endpoints = self::ENDPOINTS,
         private readonly array $mpesaExpress = [],
         private readonly string $amountNormalization = 'string',
+        private readonly bool $validatePayloads = true,
+        private readonly bool $throwOnBusinessError = false,
     ) {}
 
     public static function make(
@@ -66,6 +115,8 @@ class KcbBuniClient
             endpoints: self::resolveEndpoints($config),
             mpesaExpress: (array) ($config['mpesa_express'] ?? []),
             amountNormalization: Payload::resolveAmountNormalization($config['amount_normalization'] ?? null),
+            validatePayloads: self::boolean($config['validate_payloads'] ?? true),
+            throwOnBusinessError: self::boolean($config['throw_on_business_error'] ?? false),
         );
     }
 
@@ -74,6 +125,11 @@ class KcbBuniClient
         return $this->tokens->getAccessToken($forceRefresh);
     }
 
+    /**
+     * The payload's `callbackUrl` receives a Daraja-shaped STK result, not an
+     * Instant Payment Notification. It is unsigned, so `VerifyKcbBuniIpn` must
+     * not be applied to that route.
+     */
     public function mpesaStkPush(
         array $payload,
         string $messageId,
@@ -86,12 +142,25 @@ class KcbBuniClient
             'messageId' => $messageId,
         ]);
 
+        $payload = $this->withAmount($payload, $requestOptions);
+
+        if ($this->shouldValidate($requestOptions)) {
+            FieldRules::assert(
+                array_intersect_key($requestOptions->headers, self::MPESA_STK_PUSH_HEADER_RULES),
+                self::MPESA_STK_PUSH_HEADER_RULES,
+                'KCB Buni M-PESA Express header',
+            );
+
+            FieldRules::assert($payload, self::MPESA_STK_PUSH_RULES, 'KCB Buni M-PESA Express');
+        }
+
         return $this->authorizedRequest(
             path: $this->endpoint('mpesa_stk_push'),
             method: 'POST',
-            payload: $this->withAmount($payload, $requestOptions),
+            payload: $payload,
             query: null,
             options: $requestOptions,
+            businessContext: 'KCB Buni M-PESA Express',
         );
     }
 
@@ -110,12 +179,32 @@ class KcbBuniClient
 
     public function transferFunds(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('funds_transfer'), 'POST', $payload, null, $options);
+        $requestOptions = RequestOptions::fromArray($options);
+
+        if ($this->shouldValidate($requestOptions)) {
+            FieldRules::assert($payload, self::FUNDS_TRANSFER_RULES, 'KCB Buni Funds Transfer');
+        }
+
+        return $this->authorizedRequest(
+            path: $this->endpoint('funds_transfer'),
+            method: 'POST',
+            payload: $payload,
+            query: null,
+            options: $requestOptions,
+            businessContext: 'KCB Buni Funds Transfer',
+        );
     }
 
     public function queryCoreTransactionStatus(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('query_core_transaction_status'), 'POST', $payload, null, $options);
+        return $this->authorizedRequest(
+            path: $this->endpoint('query_core_transaction_status'),
+            method: 'POST',
+            payload: $payload,
+            query: null,
+            options: $options,
+            businessContext: 'KCB Buni Core Transaction Status',
+        );
     }
 
     public function queryTransactionDetails(
@@ -129,22 +218,101 @@ class KcbBuniClient
             payload: null,
             query: $query,
             options: $options,
+            businessContext: 'KCB Buni Transaction Details',
         );
     }
 
     public function vendingValidateRequest(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('vending_validate_request'), 'POST', $payload, null, $options);
+        return $this->authorizedRequest(
+            path: $this->endpoint('vending_validate_request'),
+            method: 'POST',
+            payload: $payload,
+            query: null,
+            options: $options,
+            businessContext: 'KCB Buni Vending Validate Request',
+        );
     }
 
     public function vendingVendorConfirmation(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('vending_vendor_confirmation'), 'POST', $payload, null, $options);
+        return $this->authorizedRequest(
+            path: $this->endpoint('vending_vendor_confirmation'),
+            method: 'POST',
+            payload: $payload,
+            query: null,
+            options: $options,
+            businessContext: 'KCB Buni Vending Vendor Confirmation',
+        );
     }
 
     public function vendingTransactionStatus(array $payload, array|RequestOptions|null $options = null): mixed
     {
-        return $this->authorizedRequest($this->endpoint('vending_transaction_status'), 'POST', $payload, null, $options);
+        return $this->authorizedRequest(
+            path: $this->endpoint('vending_transaction_status'),
+            method: 'POST',
+            payload: $payload,
+            query: null,
+            options: $options,
+            businessContext: 'KCB Buni Vending Transaction Status',
+        );
+    }
+
+    /**
+     * `KCBKEeTIMSKraServices` publishes a wildcard resource with no schema, so the
+     * operation path and body come from the KRA integration pack KCB issues.
+     */
+    public function etimsRequest(
+        string $path,
+        array $payload = [],
+        string $method = 'POST',
+        array $query = [],
+        array|RequestOptions|null $options = null,
+    ): mixed {
+        $method = strtoupper($method);
+
+        return $this->authorizedRequest(
+            path: $this->endpoint('etims', ['path' => ltrim($path, '/')]),
+            method: $method,
+            payload: $method === 'GET' ? null : $payload,
+            query: $query,
+            options: $options,
+            businessContext: 'KCB Buni eTIMS',
+        );
+    }
+
+    /**
+     * `KCBBIIpsP2PTransferStatusInquiry` is a wildcard POST resource, and is not
+     * deployed on the UAT gateway.
+     */
+    public function p2pTransferStatusInquiry(
+        array $payload,
+        string $path = '',
+        array|RequestOptions|null $options = null,
+    ): mixed {
+        return $this->authorizedRequest(
+            path: $this->endpoint('p2p_transfer_status_inquiry', ['path' => ltrim($path, '/')]),
+            method: 'POST',
+            payload: $payload,
+            query: null,
+            options: $options,
+            businessContext: 'KCB Buni P2P Transfer Status Inquiry',
+        );
+    }
+
+    public static function succeeded(mixed $response): ?bool
+    {
+        return BusinessStatus::succeeded(BusinessStatus::KCB_BUNI, $response);
+    }
+
+    public static function statusCode(mixed $response): ?string
+    {
+        return BusinessStatus::statusCode(BusinessStatus::KCB_BUNI, $response);
+    }
+
+    public static function statusMessage(mixed $response): ?string
+    {
+        return BusinessStatus::statusMessage(BusinessStatus::KCB_BUNI, $response);
     }
 
     private function authorizedRequest(
@@ -153,6 +321,7 @@ class KcbBuniClient
         ?array $payload,
         ?array $query,
         array|RequestOptions|null $options,
+        ?string $businessContext = null,
     ): mixed {
         $requestOptions = RequestOptions::fromArray($options);
         $token = $requestOptions->accessToken ?? $this->tokens->getAccessToken($requestOptions->forceTokenRefresh);
@@ -162,7 +331,7 @@ class KcbBuniClient
             'Accept' => 'application/json',
         ]);
 
-        return $this->http->send(
+        $response = $this->http->send(
             path: $path,
             method: $method,
             headers: $headers,
@@ -171,11 +340,22 @@ class KcbBuniClient
             timeoutSeconds: $requestOptions->timeoutSeconds,
             retry: $requestOptions->retry,
         );
+
+        if ($businessContext !== null && ($requestOptions->throwOnBusinessError ?? $this->throwOnBusinessError)) {
+            BusinessStatus::assert(BusinessStatus::KCB_BUNI, $response, $businessContext);
+        }
+
+        return $response;
+    }
+
+    private function shouldValidate(RequestOptions $options): bool
+    {
+        return $options->validate ?? $this->validatePayloads;
     }
 
     private function endpoint(string $name, array $replacements = []): string
     {
-        $endpoint = $this->endpoints[$name];
+        $endpoint = $this->endpoints[$name] ?? self::ENDPOINTS[$name];
 
         foreach ($replacements as $key => $value) {
             $endpoint = str_replace('{'.$key.'}', (string) $value, $endpoint);
@@ -208,6 +388,8 @@ class KcbBuniClient
             accessToken: $requestOptions->accessToken,
             forceTokenRefresh: $requestOptions->forceTokenRefresh,
             amountNormalization: $requestOptions->amountNormalization,
+            validate: $requestOptions->validate,
+            throwOnBusinessError: $requestOptions->throwOnBusinessError,
         );
     }
 
@@ -280,7 +462,8 @@ class KcbBuniClient
         }
 
         throw new ConfigurationException(
-            'KcbBuniClient base_url must be provided explicitly for environments other than uat.'
+            'KcbBuniClient base_url must be provided explicitly for environments other than ['
+            .implode(', ', array_keys(self::BASE_URLS)).'].'
         );
     }
 
@@ -355,5 +538,14 @@ class KcbBuniClient
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
+    }
+
+    private static function boolean(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 }

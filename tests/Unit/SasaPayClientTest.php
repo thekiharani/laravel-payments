@@ -2,19 +2,42 @@
 
 use Illuminate\Support\Facades\Http;
 use NoriaLabs\Payments\Contracts\AccessTokenProvider;
+use NoriaLabs\Payments\Exceptions\BusinessException;
 use NoriaLabs\Payments\Exceptions\ConfigurationException;
 use NoriaLabs\Payments\SasaPayClient;
 use NoriaLabs\Payments\Support\HttpTransport;
 use NoriaLabs\Payments\Support\RequestOptions;
 use NoriaLabs\Payments\Support\RetryPolicy;
 
-it('requires explicit production base url for sasapay', function (): void {
-    SasaPayClient::make(Http::getFacadeRoot(), [
+it('defaults to the live sasapay hosts in the production environment', function (): void {
+    $client = SasaPayClient::make(Http::getFacadeRoot(), [
         'environment' => 'production',
         'client_id' => 'client-id',
         'client_secret' => 'client-secret',
     ]);
-})->throws(ConfigurationException::class);
+
+    Http::fake([
+        'https://api.sasapay.app/*' => Http::response(['status' => true], 200),
+    ]);
+
+    $client->channelCodes(new RequestOptions(accessToken: 'token'));
+    $client->waasChannelCodes(new RequestOptions(accessToken: 'token'));
+
+    $urls = collect(Http::recorded())->map(fn (array $record): string => strtok($record[0]->url(), '?'))->all();
+
+    expect($urls)->toBe([
+        'https://api.sasapay.app/api/v1/payments/channel-codes/',
+        'https://api.sasapay.app/api/v2/waas/channel-codes/',
+    ]);
+});
+
+it('rejects an unknown sasapay environment without an explicit base url', function (): void {
+    SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'staging',
+        'client_id' => 'client-id',
+        'client_secret' => 'client-secret',
+    ]);
+})->throws(ConfigurationException::class, 'Unknown SasaPay environment [staging]');
 
 it('requests token and sends c2b payment', function (): void {
     Http::fake([
@@ -760,7 +783,7 @@ it('throws ConfigurationException when waas methods are called without a waas ba
     };
 
     $client = SasaPayClient::make(Http::getFacadeRoot(), [
-        'environment' => 'production',
+        'environment' => 'staging',
         'base_url' => 'https://custom.sasapay.test/api/v1',
     ], $tokenProvider);
 
@@ -825,4 +848,37 @@ it('exposes b2c, b2b, register_ipn_url, lipa_fare and bulk-payment paths against
         'https://custom.sasapay.test/api/v1/payments/bulk-payments/status/',
         'https://custom.sasapay.test/api/v1/utilities/bill-query',
     );
+});
+
+it('detects sasapay business failures returned with http 200', function (): void {
+    $failure = ['status' => false, 'detail' => 'Invalid merchant code'];
+
+    Http::fake([
+        'https://sandbox.sasapay.app/*' => Http::response($failure, 200),
+    ]);
+
+    $tokenProvider = new class implements AccessTokenProvider
+    {
+        public function getAccessToken(bool $forceRefresh = false): string
+        {
+            return 'token';
+        }
+    };
+
+    $lenient = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+    ], $tokenProvider);
+
+    expect($lenient->channelCodes())->toBe($failure)
+        ->and(SasaPayClient::succeeded($failure))->toBeFalse()
+        ->and(SasaPayClient::statusMessage($failure))->toBe('Invalid merchant code')
+        ->and(SasaPayClient::succeeded(['status' => true]))->toBeTrue();
+
+    $strict = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+        'throw_on_business_error' => true,
+    ], $tokenProvider);
+
+    expect(fn () => $strict->channelCodes())
+        ->toThrow(BusinessException::class, 'Invalid merchant code');
 });

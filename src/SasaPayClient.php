@@ -6,6 +6,7 @@ use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Http\Client\Factory;
 use NoriaLabs\Payments\Contracts\AccessTokenProvider;
 use NoriaLabs\Payments\Exceptions\ConfigurationException;
+use NoriaLabs\Payments\Support\BusinessStatus;
 use NoriaLabs\Payments\Support\ClientCredentialsTokenProvider;
 use NoriaLabs\Payments\Support\Hooks;
 use NoriaLabs\Payments\Support\HttpTransport;
@@ -18,6 +19,15 @@ class SasaPayClient
     public const SANDBOX_BASE_URL = 'https://sandbox.sasapay.app/api/v1';
 
     public const WAAS_SANDBOX_BASE_URL = 'https://sandbox.sasapay.app/api/v2/waas';
+
+    /**
+     * SasaPay documents the sandbox hosts only. These were established by probing
+     * the live hosts; override with `base_url` / `waas_base_url` if SasaPay issues
+     * your production application a different host.
+     */
+    public const PRODUCTION_BASE_URL = 'https://api.sasapay.app/api/v1';
+
+    public const WAAS_PRODUCTION_BASE_URL = 'https://api.sasapay.app/api/v2/waas';
 
     public const TOKEN_PATH = '/auth/token/';
 
@@ -99,6 +109,7 @@ class SasaPayClient
         private readonly string $amountNormalization = 'string',
         private readonly array $paymentDefaults = [],
         private readonly array $waasPaymentDefaults = [],
+        private readonly bool $throwOnBusinessError = false,
     ) {}
 
     public static function make(
@@ -155,7 +166,23 @@ class SasaPayClient
             amountNormalization: Payload::resolveAmountNormalization($config['amount_normalization'] ?? null),
             paymentDefaults: self::resolveDefaults($config, 'payment_defaults', ['MerchantCode', 'Currency', 'CallBackURL']),
             waasPaymentDefaults: self::resolveDefaults($config, 'waas_payment_defaults', ['merchantCode', 'currencyCode', 'callbackUrl']),
+            throwOnBusinessError: self::boolean($config['throw_on_business_error'] ?? false),
         );
+    }
+
+    public static function succeeded(mixed $response): ?bool
+    {
+        return BusinessStatus::succeeded(BusinessStatus::SASAPAY, $response);
+    }
+
+    public static function statusCode(mixed $response): ?string
+    {
+        return BusinessStatus::statusCode(BusinessStatus::SASAPAY, $response);
+    }
+
+    public static function statusMessage(mixed $response): ?string
+    {
+        return BusinessStatus::statusMessage(BusinessStatus::SASAPAY, $response);
     }
 
     public function getAccessToken(bool $forceRefresh = false): string
@@ -621,14 +648,18 @@ class SasaPayClient
             'Accept' => 'application/json',
         ]);
 
-        return $transport->send(
-            path: $path,
-            method: $method,
-            headers: $headers,
-            query: $query,
-            body: $payload,
-            timeoutSeconds: $requestOptions->timeoutSeconds,
-            retry: $requestOptions->retry,
+        return $this->assertBusinessStatus(
+            $transport->send(
+                path: $path,
+                method: $method,
+                headers: $headers,
+                query: $query,
+                body: $payload,
+                timeoutSeconds: $requestOptions->timeoutSeconds,
+                retry: $requestOptions->retry,
+            ),
+            $requestOptions,
+            "SasaPay {$method} {$path}",
         );
     }
 
@@ -648,15 +679,28 @@ class SasaPayClient
             'Accept' => 'application/json',
         ]);
 
-        return $transport->sendMultipart(
-            path: $path,
-            method: 'POST',
-            fields: $fields,
-            files: $files,
-            headers: $headers,
-            timeoutSeconds: $requestOptions->timeoutSeconds,
-            retry: $requestOptions->retry,
+        return $this->assertBusinessStatus(
+            $transport->sendMultipart(
+                path: $path,
+                method: 'POST',
+                fields: $fields,
+                files: $files,
+                headers: $headers,
+                timeoutSeconds: $requestOptions->timeoutSeconds,
+                retry: $requestOptions->retry,
+            ),
+            $requestOptions,
+            "SasaPay POST {$path}",
         );
+    }
+
+    private function assertBusinessStatus(mixed $response, RequestOptions $options, string $context): mixed
+    {
+        if ($options->throwOnBusinessError ?? $this->throwOnBusinessError) {
+            BusinessStatus::assert(BusinessStatus::SASAPAY, $response, $context);
+        }
+
+        return $response;
     }
 
     private function withAmount(array $payload, array|RequestOptions|null $options): array
@@ -735,13 +779,15 @@ class SasaPayClient
             return (string) $config['base_url'];
         }
 
-        if (($config['environment'] ?? 'sandbox') === 'sandbox') {
-            return self::SANDBOX_BASE_URL;
-        }
+        $environment = (string) ($config['environment'] ?? 'sandbox');
 
-        throw new ConfigurationException(
-            'SasaPay production base_url must be provided explicitly. The reviewed docs clearly document the sandbox host but do not clearly state a production API host.'
-        );
+        return match ($environment) {
+            'sandbox' => self::SANDBOX_BASE_URL,
+            'production', 'live' => self::PRODUCTION_BASE_URL,
+            default => throw new ConfigurationException(
+                "Unknown SasaPay environment [{$environment}]. Use sandbox or production, or set an explicit base_url."
+            ),
+        };
     }
 
     private static function resolveWaasBaseUrl(array $config): ?string
@@ -750,11 +796,11 @@ class SasaPayClient
             return (string) $config['waas_base_url'];
         }
 
-        if (($config['environment'] ?? 'sandbox') === 'sandbox') {
-            return self::WAAS_SANDBOX_BASE_URL;
-        }
-
-        return null;
+        return match ((string) ($config['environment'] ?? 'sandbox')) {
+            'sandbox' => self::WAAS_SANDBOX_BASE_URL,
+            'production', 'live' => self::WAAS_PRODUCTION_BASE_URL,
+            default => null,
+        };
     }
 
     private function ensureWaasHttp(): HttpTransport
@@ -865,6 +911,15 @@ class SasaPayClient
         }
 
         return false;
+    }
+
+    private static function boolean(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
     private static function tokenCacheKey(string $variant, array $config, string $baseUrl, string $clientId): string

@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Http;
 use NoriaLabs\Payments\Contracts\AccessTokenProvider;
+use NoriaLabs\Payments\Exceptions\BusinessException;
 use NoriaLabs\Payments\Exceptions\ConfigurationException;
 use NoriaLabs\Payments\PaystackClient;
 use NoriaLabs\Payments\Support\HttpTransport;
@@ -39,6 +40,7 @@ function paystackPathValues(): array
         'event_id' => 'EVT_123',
         'slug' => 'store-slug',
         'bin' => '539983',
+        'ref' => 'ref_123',
     ];
 }
 
@@ -64,6 +66,8 @@ function paystackEndpointCalls(): array
         'submit_charge_birthday' => fn (PaystackClient $client) => $client->submitChargeBirthday(['birthday' => '1990-01-01', 'reference' => $v['reference']]),
         'submit_charge_address' => fn (PaystackClient $client) => $client->submitChargeAddress(['address' => '1 Test Street', 'reference' => $v['reference']]),
         'check_pending_charge' => fn (PaystackClient $client) => $client->checkPendingCharge($v['reference']),
+
+        'requery_capitec_pay_charge' => fn (PaystackClient $client) => $client->requeryCapitecPayCharge($v['ref'], 'pk_test_public'),
 
         'initiate_bulk_charge' => fn (PaystackClient $client) => $client->initiateBulkCharge(['batch' => []]),
         'list_bulk_charge_batches' => fn (PaystackClient $client) => $client->listBulkChargeBatches(['perPage' => 1]),
@@ -399,4 +403,51 @@ it('throws ConfigurationException for missing constructor endpoint maps', functi
 
     expect(fn () => $client->initializeTransaction(['amount' => 100]))
         ->toThrow(ConfigurationException::class, 'Unknown Paystack endpoint [initialize_transaction].');
+});
+
+it('authorizes the capitec pay requery with the public key rather than the secret key', function (): void {
+    Http::fake([
+        'https://api.paystack.co/*' => Http::response(['status' => true], 200),
+    ]);
+
+    $configured = paystackClient(['public_key' => 'pk_test_configured']);
+    $configured->requeryCapitecPayCharge('ref_123');
+    $configured->requeryCapitecPayCharge('ref_123', 'pk_test_explicit');
+    $configured->requeryCapitecPayCharge('ref_123', options: new RequestOptions(accessToken: 'pk_test_option'));
+
+    // No public key anywhere falls back to the normal token provider.
+    paystackClient()->requeryCapitecPayCharge('ref_123');
+
+    $authorizations = collect(Http::recorded())
+        ->map(fn (array $record): string => $record[0]->header('Authorization')[0])
+        ->all();
+
+    expect($authorizations)->toBe([
+        'Bearer pk_test_configured',
+        'Bearer pk_test_explicit',
+        'Bearer pk_test_option',
+        'Bearer sk_test_default',
+    ]);
+
+    Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+        && strtok($request->url(), '?') === 'https://api.paystack.co/capitec-pay/requery/ref_123');
+});
+
+it('detects paystack business failures returned with http 200', function (): void {
+    $failure = ['status' => false, 'message' => 'Invalid key'];
+
+    Http::fake([
+        'https://api.paystack.co/*' => Http::response($failure, 200),
+    ]);
+
+    expect(paystackClient()->listBanks())->toBe($failure)
+        ->and(PaystackClient::succeeded($failure))->toBeFalse()
+        ->and(PaystackClient::statusMessage($failure))->toBe('Invalid key')
+        ->and(PaystackClient::succeeded(['status' => true]))->toBeTrue();
+
+    expect(fn () => paystackClient(['throw_on_business_error' => true])->listBanks())
+        ->toThrow(BusinessException::class, 'Invalid key');
+
+    expect(fn () => paystackClient()->authorizedGet('/bank', [], ['throw_on_business_error' => true]))
+        ->toThrow(BusinessException::class, 'Invalid key');
 });

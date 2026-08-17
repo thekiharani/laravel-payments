@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Http;
 use NoriaLabs\Payments\Contracts\AccessTokenProvider;
+use NoriaLabs\Payments\Exceptions\BusinessException;
 use NoriaLabs\Payments\Exceptions\ConfigurationException;
 use NoriaLabs\Payments\MpesaClient;
 use NoriaLabs\Payments\Support\Hooks;
@@ -330,4 +331,74 @@ it('throws ConfigurationException when no credentials and no token provider are 
     expect(fn () => MpesaClient::make(Http::getFacadeRoot(), [
         'environment' => 'sandbox',
     ]))->toThrow(ConfigurationException::class);
+});
+
+it('registers and queries pull transactions', function (): void {
+    Http::fake([
+        'https://sandbox.safaricom.co.ke/*' => Http::response(['ResponseStatus' => 'Success'], 200),
+    ]);
+
+    $client = MpesaClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+    ], mpesaTokenProvider('pull-token'));
+
+    $client->registerPullTransactions([
+        'ShortCode' => '600000',
+        'RequestType' => 'Pull',
+        'NominatedNumber' => '254700000000',
+        'CallBackURL' => 'https://example.com/mpesa/pull',
+    ]);
+
+    $client->pullTransactions([
+        'ShortCode' => '600000',
+        'StartDate' => '2026-08-01 00:00:00',
+        'EndDate' => '2026-08-18 00:00:00',
+        'OffSetValue' => '0',
+    ]);
+
+    $urls = collect(Http::recorded())->map(fn (array $record): string => $record[0]->url())->all();
+
+    expect($urls)->toBe([
+        'https://sandbox.safaricom.co.ke/pulltransactions/v1/register',
+        'https://sandbox.safaricom.co.ke/pulltransactions/v1/query',
+    ]);
+});
+
+it('rejects an unknown mpesa environment instead of erroring on a missing array key', function (): void {
+    expect(fn () => MpesaClient::make(Http::getFacadeRoot(), [
+        'environment' => 'uat',
+        'consumer_key' => 'key',
+        'consumer_secret' => 'secret',
+    ]))->toThrow(ConfigurationException::class, 'Unknown M-PESA environment [uat]');
+
+    expect(MpesaClient::make(Http::getFacadeRoot(), [
+        'environment' => 'uat',
+        'base_url' => 'https://custom.daraja.test',
+    ], mpesaTokenProvider('t')))->toBeInstanceOf(MpesaClient::class);
+});
+
+it('detects daraja business failures returned with http 200', function (): void {
+    $failure = ['errorCode' => '400.002.02', 'errorMessage' => 'Bad Request - Invalid BusinessShortCode'];
+
+    Http::fake([
+        'https://sandbox.safaricom.co.ke/*' => Http::response($failure, 200),
+    ]);
+
+    $lenient = MpesaClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+    ], mpesaTokenProvider('t'));
+
+    expect($lenient->accountBalance([]))->toBe($failure)
+        ->and(MpesaClient::succeeded($failure))->toBeFalse()
+        ->and(MpesaClient::statusCode($failure))->toBe('400.002.02')
+        ->and(MpesaClient::statusMessage($failure))->toBe('Bad Request - Invalid BusinessShortCode')
+        ->and(MpesaClient::succeeded(['ResponseCode' => '0']))->toBeTrue();
+
+    $strict = MpesaClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+        'throw_on_business_error' => true,
+    ], mpesaTokenProvider('t'));
+
+    expect(fn () => $strict->accountBalance([]))
+        ->toThrow(BusinessException::class, 'Bad Request - Invalid BusinessShortCode');
 });

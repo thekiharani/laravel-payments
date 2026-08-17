@@ -5,6 +5,8 @@ namespace NoriaLabs\Payments;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Http\Client\Factory;
 use NoriaLabs\Payments\Contracts\AccessTokenProvider;
+use NoriaLabs\Payments\Exceptions\ConfigurationException;
+use NoriaLabs\Payments\Support\BusinessStatus;
 use NoriaLabs\Payments\Support\ClientCredentialsTokenProvider;
 use NoriaLabs\Payments\Support\Hooks;
 use NoriaLabs\Payments\Support\HttpTransport;
@@ -43,6 +45,7 @@ class MpesaClient
         'bill_manager_update_single_invoice' => '/v1/billmanager-invoice/change-invoice',
         'bill_manager_update_bulk_invoice' => '/v1/billmanager-invoice/change-invoices',
         'ratiba_standing_order' => '/standingorder/v1/createStandingOrderExternal',
+        'pull_transactions_register' => '/pulltransactions/v1/register',
         'pull_transactions' => '/pulltransactions/v1/query',
     ];
 
@@ -52,6 +55,7 @@ class MpesaClient
         private readonly array $endpoints = self::ENDPOINTS,
         private readonly string $defaultB2cVersion = 'v1',
         private readonly string $amountNormalization = 'string',
+        private readonly bool $throwOnBusinessError = false,
     ) {}
 
     public static function make(
@@ -61,7 +65,7 @@ class MpesaClient
         ?Hooks $hooks = null,
         ?CacheFactory $cacheFactory = null,
     ): self {
-        $baseUrl = $config['base_url'] ?? self::BASE_URLS[$config['environment'] ?? 'sandbox'];
+        $baseUrl = self::resolveBaseUrl($config);
 
         $transport = new HttpTransport(
             http: $httpFactory,
@@ -90,6 +94,7 @@ class MpesaClient
             endpoints: $endpoints,
             defaultB2cVersion: (string) ($config['b2c_version'] ?? 'v1'),
             amountNormalization: Payload::resolveAmountNormalization($config['amount_normalization'] ?? null),
+            throwOnBusinessError: self::boolean($config['throw_on_business_error'] ?? false),
         );
     }
 
@@ -263,9 +268,32 @@ class MpesaClient
         return $this->authorizedRequest($this->endpoint('ratiba_standing_order'), $this->withAmount($payload, $options), $options);
     }
 
+    /**
+     * Registers the shortcode and callback that `pullTransactions()` then queries.
+     */
+    public function registerPullTransactions(array $payload, array|RequestOptions|null $options = null): mixed
+    {
+        return $this->authorizedRequest($this->endpoint('pull_transactions_register'), $payload, $options);
+    }
+
     public function pullTransactions(array $payload, array|RequestOptions|null $options = null): mixed
     {
         return $this->authorizedRequest($this->endpoint('pull_transactions'), $payload, $options);
+    }
+
+    public static function succeeded(mixed $response): ?bool
+    {
+        return BusinessStatus::succeeded(BusinessStatus::MPESA, $response);
+    }
+
+    public static function statusCode(mixed $response): ?string
+    {
+        return BusinessStatus::statusCode(BusinessStatus::MPESA, $response);
+    }
+
+    public static function statusMessage(mixed $response): ?string
+    {
+        return BusinessStatus::statusMessage(BusinessStatus::MPESA, $response);
     }
 
     public static function buildTimestamp(?\DateTimeInterface $dateTime = null): string
@@ -306,7 +334,7 @@ class MpesaClient
             'Accept' => 'application/json',
         ]);
 
-        return $this->http->send(
+        $response = $this->http->send(
             path: $path,
             method: $method,
             headers: $headers,
@@ -315,6 +343,12 @@ class MpesaClient
             timeoutSeconds: $requestOptions->timeoutSeconds,
             retry: $requestOptions->retry,
         );
+
+        if ($requestOptions->throwOnBusinessError ?? $this->throwOnBusinessError) {
+            BusinessStatus::assert(BusinessStatus::MPESA, $response, "M-PESA {$method} {$path}");
+        }
+
+        return $response;
     }
 
     private function withAmount(array $payload, array|RequestOptions|null $options): array
@@ -342,6 +376,26 @@ class MpesaClient
         }
 
         return $endpoint;
+    }
+
+    private static function resolveBaseUrl(array $config): string
+    {
+        $baseUrl = $config['base_url'] ?? null;
+
+        if (is_string($baseUrl) && trim($baseUrl) !== '') {
+            return trim($baseUrl);
+        }
+
+        $environment = (string) ($config['environment'] ?? 'sandbox');
+
+        if (isset(self::BASE_URLS[$environment])) {
+            return self::BASE_URLS[$environment];
+        }
+
+        throw new ConfigurationException(
+            "Unknown M-PESA environment [{$environment}]. Use one of ["
+            .implode(', ', array_keys(self::BASE_URLS)).'] or set an explicit base_url.'
+        );
     }
 
     private static function resolveEndpoints(array $config): array
@@ -383,9 +437,18 @@ class MpesaClient
     private static function tokenCacheKey(array $config): string
     {
         $env = (string) ($config['environment'] ?? 'sandbox');
-        $base = (string) ($config['base_url'] ?? self::BASE_URLS[$env] ?? 'sandbox');
+        $base = self::resolveBaseUrl($config);
         $consumer = (string) ($config['consumer_key'] ?? '');
 
         return 'payments:mpesa:token:'.sha1($env.'|'.$base.'|'.$consumer);
+    }
+
+    private static function boolean(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 }

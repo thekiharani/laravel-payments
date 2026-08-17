@@ -5,6 +5,9 @@ namespace NoriaLabs\Payments\Providers;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\ServiceProvider;
+use NoriaLabs\Payments\Http\Middleware\VerifyKcbBuniIpn;
+use NoriaLabs\Payments\Http\Middleware\VerifyPaystackWebhook;
+use NoriaLabs\Payments\Http\Middleware\VerifySasaPayCallback;
 use NoriaLabs\Payments\KcbBuniClient;
 use NoriaLabs\Payments\KcbBuniIpnVerifier;
 use NoriaLabs\Payments\MpesaClient;
@@ -62,5 +65,20 @@ class PaymentsServiceProvider extends ServiceProvider
         $this->publishes([
             __DIR__.'/../../config/payments.php' => config_path('payments.php'),
         ], 'payments-config');
+
+        $this->registerMiddlewareAliases();
+    }
+
+    private function registerMiddlewareAliases(): void
+    {
+        if (! $this->app->bound('router')) {
+            return;
+        }
+
+        $router = $this->app->make('router');
+
+        $router->aliasMiddleware('kcb-buni.ipn', VerifyKcbBuniIpn::class);
+        $router->aliasMiddleware('sasapay.callback', VerifySasaPayCallback::class);
+        $router->aliasMiddleware('paystack.webhook', VerifyPaystackWebhook::class);
     }
 }
