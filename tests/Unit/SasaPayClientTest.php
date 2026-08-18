@@ -41,7 +41,7 @@ it('rejects an unknown sasapay environment without an explicit base url', functi
 
 it('requests token and sends c2b payment', function (): void {
     Http::fake([
-        'https://sandbox.sasapay.app/api/v1/auth/token/*' => Http::response([
+        'https://sandbox.sasapay.app/oauth/v1/generate*' => Http::response([
             'status' => true,
             'access_token' => 'sasapay-token',
             'expires_in' => 3600,
@@ -72,10 +72,61 @@ it('requests token and sends c2b payment', function (): void {
     expect($response['ResponseCode'])->toBe('0');
 
     Http::assertSent(function ($request): bool {
+        return $request->url() === 'https://sandbox.sasapay.app/oauth/v1/generate?grant_type=client_credentials'
+            && $request->hasHeader('Authorization', 'Basic '.base64_encode('client-id:client-secret'));
+    });
+
+    Http::assertSent(function ($request): bool {
         return $request->url() === 'https://sandbox.sasapay.app/api/v1/payments/request-payment/'
             && $request['Amount'] === '1'
             && $request->hasHeader('Authorization', 'Bearer sasapay-token');
     });
+});
+
+it('uses the documented production token endpoint', function (): void {
+    Http::fake([
+        'https://api.sasapay.app/oauth/v1/generate*' => Http::response([
+            'access_token' => 'production-token',
+            'expires_in' => 3600,
+        ], 200),
+    ]);
+
+    $client = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'production',
+        'client_id' => 'client-id',
+        'client_secret' => 'client-secret',
+    ]);
+
+    expect($client->getAccessToken())->toBe('production-token');
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://api.sasapay.app/oauth/v1/generate?grant_type=client_credentials');
+});
+
+it('supports explicit sasapay token url overrides', function (): void {
+    Http::fake([
+        'https://auth.example.com/v1/token*' => Http::response([
+            'access_token' => 'v1-token',
+            'expires_in' => 3600,
+        ], 200),
+        'https://auth.example.com/waas/token*' => Http::response([
+            'access_token' => 'waas-token',
+            'expires_in' => 3600,
+        ], 200),
+    ]);
+
+    $client = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+        'client_id' => 'client-id',
+        'client_secret' => 'client-secret',
+        'token_url' => 'https://auth.example.com/v1/token',
+        'waas_token_url' => 'https://auth.example.com/waas/token',
+    ]);
+
+    expect($client->getAccessToken())->toBe('v1-token')
+        ->and($client->getWaasAccessToken())->toBe('waas-token');
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://auth.example.com/v1/token?grant_type=client_credentials');
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://auth.example.com/waas/token?grant_type=client_credentials');
 });
 
 it('keeps amount stringification by default and can preserve raw numeric amounts', function (): void {
@@ -107,7 +158,7 @@ it('keeps amount stringification by default and can preserve raw numeric amounts
     $rawClient->lipaFare(['amount' => 100.50]);
 
     $requests = collect(Http::recorded())
-        ->filter(fn (array $record): bool => $record[0]->url() !== 'https://sandbox.sasapay.app/api/v1/auth/token/?grant_type=client_credentials')
+        ->filter(fn (array $record): bool => $record[0]->url() !== 'https://sandbox.sasapay.app/oauth/v1/generate?grant_type=client_credentials')
         ->values();
 
     expect($requests[0][0]->data()['Amount'])->toBe('100')
@@ -404,7 +455,7 @@ it('applies configured sasapay payment defaults without overwriting explicit val
 
 it('authenticates against the documented waas token endpoint', function (): void {
     Http::fake([
-        'https://sandbox.sasapay.app/api/v2/waas/auth/token/*' => Http::response([
+        'https://sandbox.sasapay.app/oauth/v1/generate*' => Http::response([
             'status' => true,
             'access_token' => 'waas-token',
             'expires_in' => 3600,
@@ -437,7 +488,7 @@ it('authenticates against the documented waas token endpoint', function (): void
     expect($response['responseCode'])->toBe('0');
 
     Http::assertSent(function ($request): bool {
-        return $request->url() === 'https://sandbox.sasapay.app/api/v2/waas/auth/token/?grant_type=client_credentials'
+        return $request->url() === 'https://sandbox.sasapay.app/oauth/v1/generate?grant_type=client_credentials'
             && $request->hasHeader('Authorization', 'Basic '.base64_encode('client-id:client-secret'));
     });
 

@@ -29,7 +29,7 @@ class SasaPayClient
 
     public const WAAS_PRODUCTION_BASE_URL = 'https://api.sasapay.app/api/v2/waas';
 
-    public const TOKEN_PATH = '/auth/token/';
+    public const TOKEN_PATH = '/oauth/v1/generate';
 
     public const ENDPOINTS = [
         'request_payment' => '/payments/request-payment/',
@@ -132,15 +132,17 @@ class SasaPayClient
             hooks: $hooks,
         );
 
+        $tokenUrl = self::resolveTokenUrl($config, $baseUrl);
+
         $tokens = $tokenProvider ?? ClientCredentialsTokenProvider::forConfig(
             httpFactory: $httpFactory,
-            tokenUrl: rtrim($baseUrl, '/').self::TOKEN_PATH,
+            tokenUrl: $tokenUrl,
             config: $config,
             idKey: 'client_id',
             secretKey: 'client_secret',
             missingCredentialsMessage: 'SasaPayClient requires either client_id and client_secret, or a custom token provider.',
             cacheFactory: $cacheFactory,
-            cacheKey: self::tokenCacheKey('v1', $config, $baseUrl, (string) ($config['client_id'] ?? '')),
+            cacheKey: self::tokenCacheKey('v1', $config, $tokenUrl, (string) ($config['client_id'] ?? '')),
         );
 
         $waasTransport = $waasBaseUrl === null ? null : new HttpTransport(
@@ -846,17 +848,38 @@ class SasaPayClient
         $waasConfig['token_cache_skew_seconds'] = (int) ($config['waas_token_cache_skew_seconds']
             ?? $config['token_cache_skew_seconds']
             ?? 60);
+        $tokenUrl = self::resolveTokenUrl($config, $baseUrl, 'waas_token_url');
 
         return ClientCredentialsTokenProvider::forConfig(
             httpFactory: $httpFactory,
-            tokenUrl: rtrim($baseUrl, '/').self::TOKEN_PATH,
+            tokenUrl: $tokenUrl,
             config: $waasConfig,
             idKey: 'client_id',
             secretKey: 'client_secret',
             missingCredentialsMessage: 'SasaPay WAAS requires either waas_client_id and waas_client_secret, shared client_id and client_secret, or a custom token provider.',
             cacheFactory: $cacheFactory,
-            cacheKey: self::tokenCacheKey('waas', $config, $baseUrl, (string) $clientId),
+            cacheKey: self::tokenCacheKey('waas', $config, $tokenUrl, (string) $clientId),
         );
+    }
+
+    private static function resolveTokenUrl(array $config, string $baseUrl, string $key = 'token_url'): string
+    {
+        $configured = $config[$key] ?? ($key === 'waas_token_url' ? ($config['token_url'] ?? null) : null);
+
+        if (is_string($configured) && trim($configured) !== '') {
+            return $configured;
+        }
+
+        $parts = parse_url($baseUrl);
+        if (! is_array($parts) || ! isset($parts['scheme'], $parts['host'])) {
+            throw new ConfigurationException(
+                "Unable to derive the SasaPay authentication URL from base URL [{$baseUrl}]. Set {$key} explicitly."
+            );
+        }
+
+        $port = isset($parts['port']) ? ':'.$parts['port'] : '';
+
+        return $parts['scheme'].'://'.$parts['host'].$port.self::TOKEN_PATH;
     }
 
     private static function resolveEndpoints(array $config, string $key, array $defaults): array

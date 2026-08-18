@@ -39,6 +39,8 @@ return [
         'environment' => env('SASAPAY_ENVIRONMENT', 'sandbox'),
         'base_url' => env('SASAPAY_BASE_URL'),
         'waas_base_url' => env('SASAPAY_WAAS_BASE_URL'),
+        'token_url' => env('SASAPAY_TOKEN_URL'),
+        'waas_token_url' => env('SASAPAY_WAAS_TOKEN_URL'),
         'client_id' => env('SASAPAY_CLIENT_ID'),
         'client_secret' => env('SASAPAY_CLIENT_SECRET'),
         'waas_client_id' => env('SASAPAY_WAAS_CLIENT_ID'),

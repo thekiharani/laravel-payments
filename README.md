@@ -106,6 +106,8 @@ Top-level sections:
 | `environment` | `sandbox` or `production`. Any other value requires an explicit `base_url`. |
 | `base_url` | SasaPay v1 base URL. Defaults to `https://sandbox.sasapay.app/api/v1` in sandbox and `https://api.sasapay.app/api/v1` in production. |
 | `waas_base_url` | SasaPay WAAS v2 base URL. Defaults to `https://sandbox.sasapay.app/api/v2/waas` in sandbox and `https://api.sasapay.app/api/v2/waas` in production. |
+| `token_url` | Optional full SasaPay OAuth URL. Defaults to `/oauth/v1/generate` on the v1 base URL host. |
+| `waas_token_url` | Optional full WAAS OAuth URL. Defaults to `token_url`, then `/oauth/v1/generate` on the WAAS base URL host. |
 | `throw_on_business_error` | Throw `BusinessException` when SasaPay answers HTTP 200 with `"status": false`. Defaults to `false`. See [Business-Level Failures](#business-level-failures). |
 | `client_id` | SasaPay v1 client ID. Also used for WAAS unless WAAS-specific credentials are configured. |
 | `client_secret` | SasaPay v1 client secret. Also used for WAAS unless WAAS-specific credentials are configured. |
@@ -125,12 +127,10 @@ Top-level sections:
 | `callback_security.enforce_ip_whitelist` | Reject callbacks from non-allowlisted IPs when using `verifyRequest()` or the middleware. Defaults to `false`; enable it after Laravel trusted proxy handling is configured for your deployment. |
 | `callback_security.verify_signature` | Verify callback HMAC signatures when using `verifyRequest()` or the middleware. Defaults to `true`; set `SASAPAY_CALLBACK_VERIFY_SIGNATURE=false` only if you intentionally rely on a different callback-authentication control. |
 
-SasaPay's published documentation shows the sandbox hosts only. The production
-defaults (`https://api.sasapay.app/api/v1` and `https://api.sasapay.app/api/v2/waas`)
-were established by probing the live hosts: `POST /auth/token/` on each returns
-SasaPay's own credential error, identical to the sandbox host. Override
-`base_url` / `waas_base_url` if SasaPay issues your production application a
-different host.
+SasaPay documents OAuth client-credentials authentication at
+`/oauth/v1/generate`. The client derives that endpoint from the configured API
+host. Override `token_url` / `waas_token_url` if SasaPay issues your application
+a different authentication host.
 
 ### KCB Buni Config
 
@@ -898,7 +898,7 @@ SasaPay amount fields are string-cast by default for backward compatibility. Pas
 
 | Method | Endpoint |
 | --- | --- |
-| `getAccessToken()` | `GET /auth/token/?grant_type=client_credentials` |
+| `getAccessToken()` | `GET /oauth/v1/generate?grant_type=client_credentials` |
 
 ### SasaPay v1 Payments
 
@@ -949,7 +949,7 @@ SasaPay amount fields are string-cast by default for backward compatibility. Pas
 
 | Method | Endpoint |
 | --- | --- |
-| `getWaasAccessToken()` | `GET /auth/token/?grant_type=client_credentials` on the WAAS base URL |
+| `getWaasAccessToken()` | `GET /oauth/v1/generate?grant_type=client_credentials` on the configured authentication host |
 
 ### SasaPay WAAS Onboarding and Customers
 
