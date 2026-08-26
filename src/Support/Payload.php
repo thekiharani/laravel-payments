@@ -4,6 +4,47 @@ namespace NoriaLabs\Payments\Support;
 
 class Payload
 {
+    /**
+     * @param  array<int, string>  $keys
+     */
+    public static function normalizeKenyanPhoneNumbers(array $payload, array $keys): array
+    {
+        foreach ($keys as $key) {
+            if (! array_key_exists($key, $payload) || (! is_string($payload[$key]) && ! is_int($payload[$key]))) {
+                continue;
+            }
+
+            $payload[$key] = self::normalizeKenyanPhoneNumber($payload[$key]);
+        }
+
+        return $payload;
+    }
+
+    public static function normalizeKenyanPhoneNumber(string|int $value): string|int
+    {
+        $raw = (string) $value;
+
+        if (preg_match('/^[\d\s()+-]+$/', $raw) !== 1) {
+            return $value;
+        }
+
+        $digits = preg_replace('/\D/', '', $raw) ?? '';
+
+        if (preg_match('/^0([17]\d{8})$/', $digits, $matches) === 1) {
+            return '254'.$matches[1];
+        }
+
+        if (preg_match('/^[17]\d{8}$/', $digits) === 1) {
+            return '254'.$digits;
+        }
+
+        if (preg_match('/^254[17]\d{8}$/', $digits) === 1) {
+            return $digits;
+        }
+
+        return $value;
+    }
+
     public static function normalizeAmount(array $payload, mixed $normalization = 'string'): array
     {
         if (self::resolveAmountNormalization($normalization) === 'none') {

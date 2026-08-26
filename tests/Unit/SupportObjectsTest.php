@@ -135,6 +135,32 @@ it('leaves non-scalar amount values untouched instead of erroring', function ():
     expect(Payload::stringifyAmount($payload))->toBe($payload);
 });
 
+it('normalizes Kenyan mobile numbers for provider payloads', function (string|int $input, string|int $expected): void {
+    expect(Payload::normalizeKenyanPhoneNumber($input))->toBe($expected);
+})->with([
+    '07 mobile number' => ['0704444721', '254704444721'],
+    '01 mobile number' => ['0110123456', '254110123456'],
+    'without trunk prefix' => ['704444721', '254704444721'],
+    'formatted international number' => ['+254 704 444 721', '254704444721'],
+    'canonical number' => ['254704444721', '254704444721'],
+    'unrecognized prefix' => ['0804444721', '0804444721'],
+    'non-phone text' => ['customer-0704444721', 'customer-0704444721'],
+]);
+
+it('normalizes only named phone fields in a payload', function (): void {
+    $payload = [
+        'PhoneNumber' => '0704444721',
+        'Reference' => '0704444721',
+        'Metadata' => ['phone' => '0704444721'],
+    ];
+
+    expect(Payload::normalizeKenyanPhoneNumbers($payload, ['PhoneNumber', 'Metadata']))->toBe([
+        'PhoneNumber' => '254704444721',
+        'Reference' => '0704444721',
+        'Metadata' => ['phone' => '0704444721'],
+    ]);
+});
+
 it('carries the new validate and business-error request options', function (): void {
     $options = RequestOptions::fromArray([
         'validate' => false,

@@ -142,6 +142,7 @@ class KcbBuniClient
             'messageId' => $messageId,
         ]);
 
+        $payload = Payload::normalizeKenyanPhoneNumbers($payload, ['phoneNumber']);
         $payload = $this->withAmount($payload, $requestOptions);
 
         if ($this->shouldValidate($requestOptions)) {

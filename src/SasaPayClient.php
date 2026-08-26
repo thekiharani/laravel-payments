@@ -199,6 +199,8 @@ class SasaPayClient
 
     public function requestPayment(array $payload, array|RequestOptions|null $options = null): mixed
     {
+        $payload = Payload::normalizeKenyanPhoneNumbers($payload, ['PhoneNumber']);
+
         return $this->authorizedRequest(
             $this->endpoint('request_payment'),
             $this->withAmount($this->withPaymentDefaults($payload), $options),
@@ -462,6 +464,8 @@ class SasaPayClient
 
     public function waasRequestPayment(array $payload, array|RequestOptions|null $options = null): mixed
     {
+        $payload = Payload::normalizeKenyanPhoneNumbers($payload, ['mobileNumber']);
+
         return $this->waasAuthorizedRequest($this->waasEndpoint('request_payment'), $this->withWaasPaymentDefaults($payload), $options);
     }
 

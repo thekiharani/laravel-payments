@@ -105,6 +105,8 @@ class MpesaClient
 
     public function stkPush(array $payload, array|RequestOptions|null $options = null): mixed
     {
+        $payload = Payload::normalizeKenyanPhoneNumbers($payload, ['PartyA', 'PhoneNumber']);
+
         return $this->authorizedRequest($this->endpoint('stk_push'), $this->withAmount($payload, $options), $options);
     }
 

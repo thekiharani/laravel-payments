@@ -211,6 +211,11 @@ $response = $mpesa->stkPush([
 ]);
 ```
 
+Kenyan mobile numbers supplied to M-PESA payment requests are normalized automatically. Daraja
+`stkPush()`, SasaPay `requestPayment()` / `waasRequestPayment()`, and KCB Buni `mpesaStkPush()`
+accept local `07XXXXXXXX` and `01XXXXXXXX` numbers, unprefixed numbers, and formatted `+254`
+numbers. They are sent to the provider as `2547XXXXXXXX` or `2541XXXXXXXX`.
+
 ### SasaPay v1 C2B
 
 ```php
@@ -557,7 +562,7 @@ $buni = $manager->kcbBuni([
 
 ## KCB Buni Coverage
 
-The KCB Buni client keeps Buni field names exactly as documented. It does not translate `phoneNumber`, `callbackUrl`, `transactionReference`, or nested request payloads. The only automatic payload normalization is string-casting `amount` for `mpesaStkPush()` by default, matching the Buni M-PESA Express schema. Set `amount_normalization` to `none` when you need to preserve raw JSON number types. Note that `debitAmount` on `transferFunds()` is never stringified — Buni's Funds Transfer schema types it as a JSON number.
+The KCB Buni client keeps Buni field names exactly as documented. It does not translate `callbackUrl`, `transactionReference`, or nested request payloads. For `mpesaStkPush()`, it normalizes Kenyan `phoneNumber` values to `2547XXXXXXXX` or `2541XXXXXXXX` and string-casts `amount` by default, matching the Buni M-PESA Express schema. Set `amount_normalization` to `none` when you need to preserve raw JSON number types. Note that `debitAmount` on `transferFunds()` is never stringified — Buni's Funds Transfer schema types it as a JSON number.
 
 ### KCB Buni Payload Validation
 

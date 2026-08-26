@@ -65,6 +65,31 @@ it('authenticates and sends stk push requests', function (): void {
     });
 });
 
+it('normalizes local Kenyan numbers in stk push requests', function (string $local, string $international): void {
+    Http::fake([
+        'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest' => Http::response([
+            'ResponseCode' => '0',
+            'CheckoutRequestID' => 'ws_CO_123',
+        ], 200),
+    ]);
+
+    $client = MpesaClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+    ], mpesaTokenProvider());
+
+    $client->stkPush([
+        'Amount' => 1,
+        'PartyA' => $local,
+        'PhoneNumber' => $local,
+    ]);
+
+    Http::assertSent(fn ($request): bool => $request['PartyA'] === $international
+        && $request['PhoneNumber'] === $international);
+})->with([
+    '07 mobile number' => ['0704444721', '254704444721'],
+    '01 mobile number' => ['0110123456', '254110123456'],
+]);
+
 it('supports external token providers hooks and request headers', function (): void {
     Http::fake([
         'https://sandbox.safaricom.co.ke/mpesa/accountbalance/v1/query' => Http::response([

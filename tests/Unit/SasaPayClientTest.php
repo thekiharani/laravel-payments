@@ -83,6 +83,35 @@ it('requests token and sends c2b payment', function (): void {
     });
 });
 
+it('normalizes local Kenyan numbers in c2b payment requests', function (string $local, string $international): void {
+    Http::fake([
+        'https://sandbox.sasapay.app/api/v1/payments/request-payment/' => Http::response([
+            'status' => true,
+            'ResponseCode' => '0',
+        ], 200),
+    ]);
+
+    $client = SasaPayClient::make(Http::getFacadeRoot(), [
+        'environment' => 'sandbox',
+    ], new class implements AccessTokenProvider
+    {
+        public function getAccessToken(bool $forceRefresh = false): string
+        {
+            return 'token';
+        }
+    });
+
+    $client->requestPayment([
+        'Amount' => 1,
+        'PhoneNumber' => $local,
+    ]);
+
+    Http::assertSent(fn ($request): bool => $request['PhoneNumber'] === $international);
+})->with([
+    '07 mobile number' => ['0704444721', '254704444721'],
+    '01 mobile number' => ['0110123456', '254110123456'],
+]);
+
 it('uses the documented production token endpoint', function (): void {
     Http::fake([
         'https://api.sasapay.app/oauth/v1/generate*' => Http::response([
@@ -477,7 +506,7 @@ it('authenticates against the documented waas token endpoint', function (): void
         'merchantReference' => 'REF-001',
         'merchantCode' => '600980',
         'networkCode' => '63902',
-        'mobileNumber' => '254700000080',
+        'mobileNumber' => '0700000080',
         'receiverAccountNumber' => '600980-1',
         'amount' => '50',
         'currencyCode' => 'KES',
@@ -494,6 +523,7 @@ it('authenticates against the documented waas token endpoint', function (): void
 
     Http::assertSent(function ($request): bool {
         return $request->url() === 'https://sandbox.sasapay.app/api/v2/waas/payments/request-payment/'
+            && $request['mobileNumber'] === '254700000080'
             && $request->hasHeader('Authorization', 'Bearer waas-token');
     });
 });

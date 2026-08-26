@@ -366,8 +366,9 @@ it('validates the documented mpesa express constraints before sending', function
         'MSG1',
     ))->toThrow(ValidationException::class, '[transactionDescription] must not exceed 13 characters');
 
-    expect(fn () => $client->mpesaStkPush(array_replace($valid, ['phoneNumber' => '0722000000']), 'MSG1'))
-        ->toThrow(ValidationException::class, '[phoneNumber] is malformed. Expected format: 2547XXXXXXXX.');
+    $client->mpesaStkPush(array_replace($valid, ['phoneNumber' => '0722000000']), 'MSG1');
+
+    Http::assertSent(fn ($request): bool => $request['phoneNumber'] === '254722000000');
 
     expect(fn () => $client->mpesaStkPush(array_replace($valid, ['sharedShortCode' => 'true']), 'MSG1'))
         ->toThrow(ValidationException::class, '[sharedShortCode] must be a boolean.');
